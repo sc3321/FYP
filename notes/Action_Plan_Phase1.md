@@ -48,7 +48,6 @@ By **January (~8–10 weeks)**, develop:
 
 **Goals**
 - Understand OS behavior under real workloads, not just synthetic benchmarks.
-
 **Actions**
 - Build a simple **inference microservice** (Python or C++):
   - One small model (e.g., MLP or ResNet).

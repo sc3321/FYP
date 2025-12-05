@@ -3,7 +3,7 @@
 #include <assert.h>
 #include <cstdio>
 #include <iterator>
-#include "/Users/shreechan/Library/HIP-CPU/include/hip/hip_runtime.h"
+#include "hip/hip_runtime.h"
 
 __global__
 void kernel(const int* arr_A, const int* arr_B, int* arr_C, int n){

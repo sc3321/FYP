@@ -1,0 +1,23 @@
+Completed the GPU program for deploying kernels to the GPU.
+
+Learnt about the basics of GPU programming paradigms, parallelism and thread deployment.
+
+Thinking about potential OS abstractions:
+
+    Observation: In HIP/CUDA, the programmer manually maps logical iteration space to (blockIdx, threadIdx, blockDim) and computes a flat index. This is error-prone and bakes hardware/launch assumptions into the code.
+
+    Tension: The runtime and hardware know much more about:
+
+        resource pressure
+
+        occupancy
+
+        concurrent workloads
+
+    Yet, the programmer has to choose grid/block layout up front and encode the mapping into their kernel.
+
+    Possible direction: Explore abstractions where:
+
+        the programmer expresses logical parallelism (N work items, maybe with structure), and
+
+        the runtime (possibly with OS hints) chooses the physical mapping/tiling dynamically.

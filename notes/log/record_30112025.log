@@ -1,0 +1,5 @@
+
+- Read through the AMD GPU programming model spec:
+   https://rocm.docs.amd.com/projects/HIP/en/latest/understand/programming_model.html
+
+- Wrote a basic C array iteration program to convert into a GPU program.

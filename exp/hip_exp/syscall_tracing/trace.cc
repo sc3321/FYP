@@ -1,5 +1,3 @@
-#include <hip/hip_api.h>
-#include <hip/hip_enums.h>
 #include <hip/hip_runtime.h>
 #include <cstdio>
 #include <iterator>
@@ -13,7 +11,6 @@ __global__ void add_one(int* data){
         if(i < 256){
             data[i] += 1;
         }
-    }
 }
 #endif
 
@@ -28,6 +25,7 @@ __global__ void add_one(int* data){
 
 int main(){
 
+    hipFree(nullptr);
 
     const int N = 256;
     int *h = (int*)std::malloc(N * sizeof(int));
@@ -46,7 +44,7 @@ int main(){
        hipMemcpy(dev_ptr, h, N * sizeof(int), hipMemcpyHostToDevice);
        hipMemcpy(h, dev_ptr, N * sizeof(int), hipMemcpyDeviceToHost);
        hipFree(dev_ptr);
-       std::printf("alloc_copy finished")  
+       std::printf("alloc_copy finished");  
     #endif // ALLOC
    
 
@@ -56,7 +54,7 @@ int main(){
       hipMemcpy(d, h, N * sizeof(int), hipMemcpyHostToDevice);
 
       for (int it = 0; it < KERNEL_ITERS; it++) {
-        hipLaunchKernelGGL(add1, dim3(1), dim3(256), 0, 0, d);
+        hipLaunchKernelGGL(add_one, dim3(1), dim3(256), 0, 0, d);
       }
       hipDeviceSynchronize();
 

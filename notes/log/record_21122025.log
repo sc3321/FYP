@@ -3,3 +3,26 @@ Made a plan finally for the remainder of phase 1 after the FYP meeting from earl
 Got some clarity for what the rest of the project will look like which is detailed in: "../phases_2_to_4_overview.md"
 
 Phase 3 is probably the most critical in terms of systems programming so needs to be started very soon. Phase 1 is key for a good foundation. It is all about syscall exploration.
+
+Also done today:
+
+Understanding toolchaining which has been tough, but finally got some kind of platform agnostic makefile setup. 
+
+Kind of understand now finally that hip_cpu uses inline headers to provide all library functions.
+No dynamic library linking!
+
+
+Make has its own syntax with if statements etc. 
+
+
+    $(BASELINE_EXE): $(SRC) | $(BUILD_DIR)
+        $(CXX) $(CXXFLAGS) $< -o $@ -DBASELINE
+
+    TARGET : NORMAL_DEPS | ORDER_ONLY_DEPS
+    <TAB> RECIPE
+
+ORDER_ONLY_DEPS are important and basically its like saying, this must exist for the build to continue but changes inside this directory or in these flags do not require a complete rebuild.
+
+In the recipe, the: "$<" is Make translation for the first dependency i.e the NORMAL_DEPS and the $@ is for the TARGET.
+
+Got the Make command working and the trace.cc program compiling in the three different scenarios. 3 executables in my build/ dir. 

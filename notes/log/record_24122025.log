@@ -1,0 +1,3 @@
+Yesterday (and the past couple of days) have been spent instrumenting and making sure the syscall profiling code is airtight and compiles correctly. 
+
+I have added HIP_ERROR checking code so that silent compile errors are caught and handled appropriately. I have also made sure that there are runtime flags to create proper testbenches that can be reproduced across runs. 

@@ -303,5 +303,150 @@ def plot_heatmap_per_variant(
     top_sys = top_syscalls_by_mean_metric(records, variant, metric, top_k)
 
     mat: List[List[float]] = []
-    for s in to
+    for s in top_sys:
+        row = []
+        for (b, it) in runs:
+            v = run_vals[(b, it)].get(s, 0.0)
+            if metric == "calls" and normalize_calls_per_iter:
+                v = v / max(it, 1)
+            row.append(float(v))
+        mat.append(row)
+
+    plt.figure(figsize=(max(10, len(runs) * 0.9), max(5, len(top_sys) * 0.5)))
+    im = plt.imshow(mat, aspect="auto")
+
+    plt.yticks(range(len(top_sys)), top_sys)
+    plt.xticks(range(len(runs)), [run_key(r) for r in runs], rotation=0)
+
+    if metric == "pct_time":
+        plt.title(f"{variant}: %time heatmap (top {top_k} syscalls)")
+        cbar_label = "% time"
+        fname = f"{variant}_heatmap_pct_time.png"
+    else:
+        label = "calls/iter" if normalize_calls_per_iter else "calls"
+        plt.title(f"{variant}: {label} heatmap (top {top_k} syscalls)")
+        cbar_label = label
+        fname = f"{variant}_heatmap_calls_per_iter.png" if normalize_calls_per_iter else f"{variant}_heatmap_calls.png"
+
+    plt.colorbar(im, label=cbar_label)
+    plt.tight_layout()
+    out = out_dir / fname
+    plt.savefig(out, dpi=200)
+    plt.close()
+    print(f"Wrote {out}")
+
+
+def plot_delta_to_baseline(
+    records: List[Record],
+    out_dir: Path,
+    variant: str,
+    metric: str,   # "pct_time" or "calls"
+    top_k: int = 12,
+    normalize_calls_per_iter: bool = True,
+) -> None:
+    """
+    For each run config common to baseline and variant:
+      delta = variant_metric - baseline_metric
+    Produces one plot per run (bytes,iters).
+    """
+    import matplotlib.pyplot as plt
+
+    assert metric in ("pct_time", "calls")
+    if variant == "baseline":
+        return
+
+    runs_v, vals_v = build_run_table(records, variant, metric)
+    runs_b, vals_b = build_run_table(records, "baseline", metric)
+
+    common_runs = sorted(set(runs_v).intersection(set(runs_b)))
+    if not common_runs:
+        return
+
+    # Compare on syscalls that matter for the variant (not baseline)
+    top_sys = top_syscalls_by_mean_metric(records, variant, metric, top_k)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for (b, it) in common_runs:
+        labels: List[str] = []
+        deltas: List[float] = []
+
+        for s in top_sys:
+            vv = vals_v[(b, it)].get(s, 0.0)
+            bb = vals_b[(b, it)].get(s, 0.0)
+            if metric == "calls" and normalize_calls_per_iter:
+                vv = vv / max(it, 1)
+                bb = bb / max(it, 1)
+            labels.append(s)
+            deltas.append(float(vv - bb))
+
+        # Sort by magnitude so it reads well
+        order = sorted(range(len(deltas)), key=lambda i: abs(deltas[i]), reverse=True)
+        labels = [labels[i] for i in order]
+        deltas = [deltas[i] for i in order]
+
+        plt.figure(figsize=(10, max(5, len(labels) * 0.35)))
+        plt.barh(labels[::-1], deltas[::-1])
+        plt.axvline(0.0)
+        plt.tight_layout()
+
+        if metric == "pct_time":
+            plt.xlabel("delta %time (variant - baseline)")
+            plt.title(f"{variant} vs baseline: %time delta — {format_bytes(b)}, {it} iters")
+            fname = f"{variant}_delta_pct_{format_bytes(b)}_{it}iters.png"
+        else:
+            xlabel = "delta calls/iter" if normalize_calls_per_iter else "delta calls"
+            plt.xlabel(f"{xlabel} (variant - baseline)")
+            plt.title(f"{variant} vs baseline: {xlabel} — {format_bytes(b)}, {it} iters")
+            fname = f"{variant}_delta_calls_{format_bytes(b)}_{it}iters.png"
+
+        out = out_dir / fname
+        plt.tight_layout()
+        plt.savefig(out, dpi=200)
+        plt.close()
+        print(f"Wrote {out}")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--results-root", type=Path, required=True)
+    ap.add_argument("--variants", nargs="+", default=["alloc", "baseline", "kernels"])
+    ap.add_argument("--top", type=int, default=8, help="Top K syscalls for stacked/heatmap/delta")
+    ap.add_argument("--out", type=Path, default=Path("./_strace_plots"))
+    args = ap.parse_args()
+
+    records, stats = collect_records(args.results_root, args.variants)
+    print(
+        "Scan stats:",
+        f"txt_files_found={stats['txt_files_found']},",
+        f"matched_param_filenames={stats['matched_param_filenames']},",
+        f"files_with_parsed_rows={stats['files_with_parsed_rows']},",
+        f"total_rows_parsed={stats['total_rows_parsed']}",
+    )
+
+    if not records:
+        raise SystemExit("No records parsed.")
+
+    args.out.mkdir(parents=True, exist_ok=True)
+
+    for v in args.variants:
+        vdir = args.out / v
+
+        # Stacked mixes (the most readable)
+        plot_overall_mix_per_run(records, vdir, v, top_k=args.top, metric="pct_time")
+        plot_overall_mix_per_run(records, vdir, v, top_k=args.top, metric="calls", normalize_calls_per_iter=True)
+
+        # Heatmaps (quickly show what changes where)
+        plot_heatmap_per_variant(records, vdir, v, metric="pct_time", top_k=max(args.top, 12))
+        plot_heatmap_per_variant(records, vdir, v, metric="calls", top_k=max(args.top, 12), normalize_calls_per_iter=True)
+
+        # Deltas to baseline (very high signal for interpretation)
+        plot_delta_to_baseline(records, vdir, v, metric="pct_time", top_k=max(args.top, 12))
+        plot_delta_to_baseline(records, vdir, v, metric="calls", top_k=max(args.top, 12), normalize_calls_per_iter=True)
+
+    print(f"Done. Plots under: {args.out.resolve()}")
+
+
+if __name__ == "__main__":
+    main()
 

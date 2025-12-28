@@ -19,8 +19,6 @@ Assumes filenames contain size+unit and iters, e.g.:
   10mb_100iters_summary.txt
   1048576b_100iters_summary.txt
 
-Run from inside results/:
-  python3 sysparser.py --results-root . --out ./_strace_plots --top 8
 """
 
 from __future__ import annotations

@@ -377,7 +377,7 @@ def parse_int_list(s: str) -> List[int]:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Numerical analysis for strace -c sweeps (elasticities, per-iter metrics).")
     ap.add_argument("--results-root", type=Path, required=True, help="Root directory containing strace .txt outputs.")
-    ap.add_argument("--variants", type=str, default="baseline,alloc,kernel", help="Comma-separated variant folder names.")
+    ap.add_argument("--variants", type=str, default="baseline,alloc,kernels", help="Comma-separated variant folder names.")
     ap.add_argument("--bytes", type=str, default="1000000,5000000,10000000", help="Comma-separated bytes sweep points.")
     ap.add_argument("--iters", type=str, default="100,5000,100000", help="Comma-separated iteration sweep points.")
     ap.add_argument("--bucket-map", type=Path, default=None, help="Optional CSV mapping: syscall,category")

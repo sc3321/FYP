@@ -1,123 +1,170 @@
-# Phase 1 Timeline (Now → Jan 22)
+# Phase 1: Detailed Plan (Next 3 Weeks)
 
-**Phase 1 goal:** Build empirical grounding by observing how real GPU workloads (microbenchmarks and AI inference) interact with the Linux OS across NVIDIA and AMD GPUs. This phase is about *understanding reality*, not designing solutions yet.
-
----
-
-## Week 1: Foundations & controlled microbenchmarks
-
-### Focus
-Establish a clean experimental harness and validate that you can reliably observe GPU–OS interactions.
-
-### Tasks
-- Finalize and clean up GPU program variants:
-  - CPU-only baseline
-  - GPU alloc/free only
-  - GPU alloc + simple kernel
-- Ensure versions exist for:
-  - CUDA (NVIDIA)
-  - HIP (AMD)
-- Set up repeatable run scripts (fixed sizes, warmup, iterations).
-- Run initial syscall profiling:
-  - `strace -c`
-  - Focused traces (`mmap`, `ioctl`, `futex`, `poll`).
-
-### Deliverables
-- Working repo with scripts and variants
-- First syscall summary tables
-- Short notes: *what surprised you, what didn’t*
-
-### Skills developed
-- GPU runtime basics
-- Linux syscall tracing
-- Experimental hygiene
+**Project:** New OS Abstractions for AI Workloads in Datacenters
+**Time window:** ~3 weeks (end of Dec → Jan 22)
 
 ---
 
-## Week 2: Cross-vendor comparison (microbenchmarks)
+## 0. Purpose of Phase 1 (anchor)
 
-### Focus
-Identify which OS interactions are vendor-agnostic versus vendor-specific.
+Phase 1 is a **constraint–discovery phase**. Its goal is *not* to design or implement a new OS abstraction, but to determine:
 
-### Tasks
-- Run the same microbenchmarks on:
-  - NVIDIA lab machines
-  - AMD GPU (cloud or borrowed)
-- Normalize parameters (problem size, iteration count).
-- Compare syscall distributions side-by-side.
+> **Which dimensions of AI-style GPU execution actually drive OS interaction, and which do not.**
 
-### Deliverables
-- NVIDIA vs AMD syscall tables
-- Annotated list:
-  - Common syscalls
-  - Divergent behavior
-
-### Skills developed
-- Comparative systems analysis
-- Hypothesis formation from data
+The output of Phase 1 is a *small set of empirically grounded constraints* that any future OS/runtime abstraction must satisfy.
 
 ---
 
-## Week 3: Minimal Apple Metal exploration (bounded scope)
+## 1. Core experimental axes (non‑negotiable)
 
-### Focus
-Briefly contrast Linux GPU behavior with a tightly integrated platform.
+Phase 1 reasoning is organised around three independent axes:
 
-### Tasks
-- Run a minimal Metal compute workload locally.
-- Capture one Metal System Trace.
-- Record *qualitative* observations only.
+1. **Size axis (bytes)** – how much data is touched
+2. **Repetition axis (iterations)** – how often work is issued
+3. **Execution axis (execution model)** – *who* executes the work
 
-### Deliverables
-- 3–5 bullet-point observations
-- One short subsection for interim report
+   * CPU baseline (no GPU runtime)
+   * GPU runtime bookkeeping only (alloc)
+   * GPU runtime + kernel dispatch (kernels)
 
-### Skills developed
-- Platform comparison literacy
+All Phase‑1 questions, analyses, and claims must map directly to one of these axes.
 
 ---
 
-## Week 4: Real AI workload on NVIDIA and AMD
+## 2. Workload consistency rules (important)
 
-### Focus
-Move from synthetic benchmarks to datacenter-relevant workloads.
+To make the execution axis meaningful:
 
-### Tasks
-- Select one portable AI inference workload (e.g., ResNet-18 or small transformer).
-- Run inference on:
-  - CUDA (NVIDIA)
-  - HIP/ROCm (AMD)
-- Collect syscall profiles and basic latency metrics.
-- Compare syscall patterns across vendors.
+* **Baseline and kernel workloads must be semantically comparable**
 
-### Deliverables
-- Syscall comparison tables for AI inference
-- Notes on which OS interactions scale with workload complexity
+  * Same buffer size (`bytes`)
+  * Same notion of repetition (`iters`)
+  * Same unit of work (e.g., touch/increment array)
 
-### Skills developed
-- ML workload profiling
-- Understanding runtime pressure on the OS
+* **Alloc workload is intentionally different**, but:
+
+  * Uses the same `bytes`
+  * Uses `iters` as number of alloc/free (or alloc/copy) operations
+
+This ensures differences reflect *execution model*, not workload semantics.
 
 ---
 
-## Weeks 5–6: Synthesis & interim report writing
+## 3. The three frozen Phase‑1 questions
 
-### Focus
-Turn experiments into a coherent narrative.
+These are **axis‑derived questions**, not data‑derived questions.
 
-### Tasks
-- Write ~2 hours/day on the interim report.
-- While writing, run small follow-up experiments as needed.
-- Synthesize:
-  - What OS mechanisms appear essential?
-  - What varies by vendor?
-  - What seems accidental or historical?
+### Q1 – Size axis
 
-### Deliverables
-- Interim report submission
-- Clear list of Phase 2 research questions
+> *Holding repetition and execution model constant, how do syscall categories change as buffer size increases?*
 
-### Skills developed
-- Technical writing
-- Systems-level reasoning
+### Q2 – Repetition axis
+
+> *Holding buffer size and execution model constant, which syscall categories scale with repetition and which remain constant?*
+
+### Q3 – Execution axis
+
+> *For fixed buffer size and repetition, which syscall categories appear or dominate only when GPU runtimes are involved compared to a CPU baseline?*
+
+Once written, these questions are **frozen** for Phase 1.
+
+---
+
+## 4. How questions become claims (mechanical process)
+
+For **each** frozen question:
+
+1. Fix all *non‑relevant* axes
+2. Collapse raw syscalls → syscall categories
+3. Observe scaling behaviour (flat / linear / sublinear)
+4. Rewrite the answer as a **constraint**:
+
+> *OS interaction depends on A but is insensitive to B, ruling out C.*
+
+Claims are not explanations; they are **eliminations of possibility**.
+
+---
+
+## 5. Week‑by‑week plan
+
+### Week 1 – Question freezing & HIP‑CPU compression
+
+**Goals:**
+
+* Make the execution axis valid
+* Freeze questions
+* Produce first‑pass claims
+
+**Tasks:**
+
+* Implement real CPU baseline workload
+* Ensure `bytes` and `iters` semantics are identical across variants
+* Answer Q1–Q3 using HIP‑CPU data only
+* Produce:
+
+  * 1 table/plot per question
+  * 1 paragraph answer per question
+  * 1 draft claim per question
+
+**Deliverables:**
+
+* Frozen Q1–Q3
+* 3 answer artifacts
+* 3 draft constraints
+
+---
+
+### Week 2 – Real GPU & vendor validation
+
+**Goals:**
+
+* Test whether Phase‑1 constraints are structural or runtime‑specific
+
+**Tasks:**
+
+* Run same microbenchmarks on:
+
+  * CUDA (NVIDIA)
+  * HIP on real AMD GPU (if available)
+* Re‑answer Q1–Q3 on the new stack
+* Compare against HIP‑CPU results
+
+**Deliverables:**
+
+* Vendor comparison tables
+* Claims annotated as:
+
+  * Vendor‑agnostic
+  * Vendor‑specific
+  * Uncertain
+
+---
+
+### Week 3 – ResNet validation & Phase‑1 synthesis
+
+**Goals:**
+
+* Show relevance to real AI workloads
+* Finalise Phase‑1 outputs
+
+**Tasks:**
+
+* Run ResNet inference under `strace -c`
+* Apply same syscall categorisation
+* Map ResNet behaviour to Phase‑1 claims
+* Write Phase‑1 synthesis and Phase‑2 handoff
+
+**Deliverables:**
+
+* ResNet validation section
+* Final set of 3–6 Phase‑1 constraints
+* Clear statement of what Phase 2 must investigate
+
+---
+
+## 6. End‑of‑Phase‑1 success criteria
+
+Phase 1 is complete when you can state, without CSVs:
+
+> *Which axes of AI execution drive OS interaction, which do not, and which behaviours are structural across vendors and workloads.*
 

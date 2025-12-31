@@ -1,3 +1,4 @@
+#include <cstring>
 #include <hip/hip_enums.h>
 #include <hip/hip_runtime.h>
 #include <assert.h>
@@ -22,6 +23,13 @@ __global__ void add_one(int* data, int N){
                                       \
     } while(0)                        \
 
+void add_one(int* baseArray, size_t size){
+    int counter = 0;
+    for(counter = 0; counter < size; ++counter){
+        baseArray[counter] += 1;
+    }
+}
+
 int main(int argc, char *argv[]){
    
     if(argc != 3){
@@ -42,10 +50,17 @@ int main(int argc, char *argv[]){
     }
     for(int i = 0; i < N; ++i){
         h[i] = i;
-    } 
-
+    }
+   
     #ifdef BASELINE
+        int *bptr = (int*)std::malloc(N * sizeof(int));
+        memcpy(bptr,h, N * sizeof(int));
+        for(int it = 0; it < iterations; ++it){
+            add_one(bptr, N);
+        }
+        assert(bptr[0] == iterations);
         std::printf("Baseline syscall run. Configuration: bytes: %d, iterations: %d. Printing last element of h...: %d\n",bytes, iterations, h[N-1]);
+
     #endif
     
 

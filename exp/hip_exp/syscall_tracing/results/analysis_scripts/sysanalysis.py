@@ -196,6 +196,9 @@ class AggRow:
     calls_per_iter: float
     usec_per_iter: float
     usec_per_call: float
+    
+    calls_per_byte: float
+    usec_per_byte: float
 
 def aggregate(records: List[Record], by: str, bucket_map: Optional[Dict[str, str]]) -> List[AggRow]:
     """
@@ -219,6 +222,10 @@ def aggregate(records: List[Record], by: str, bucket_map: Optional[Dict[str, str
         usec_per_iter = safe_div(seconds * 1e6, iters)
         usec_per_call = safe_div(seconds * 1e6, calls)
 
+        calls_per_byte = safe_div(calls, bytes_)
+        usec_per_byte = safe_div(seconds * 1e6, bytes_)
+
+
         out.append(
             AggRow(
                 variant=variant,
@@ -231,6 +238,8 @@ def aggregate(records: List[Record], by: str, bucket_map: Optional[Dict[str, str
                 calls_per_iter=calls_per_iter,
                 usec_per_iter=usec_per_iter,
                 usec_per_call=usec_per_call,
+                calls_per_byte=calls_per_byte,
+                usec_per_byte=usec_per_byte,
             )
         )
     return out
@@ -418,17 +427,19 @@ def main() -> int:
             "calls_per_iter": r.calls_per_iter,
             "usec_per_iter": r.usec_per_iter,
             "usec_per_call": r.usec_per_call,
+            "calls_per_byte": r.calls_per_byte,
+            "usec_per_byte": r.usec_per_byte,
         }
 
     write_csv(
         args.outdir / "aggregate_syscall.csv",
         (agg_to_dict(r) for r in agg_sys),
-        ["variant", "bytes", "iterations", "key", "calls", "seconds", "pct_time_sum", "calls_per_iter", "usec_per_iter", "usec_per_call"],
+        ["variant", "bytes", "iterations", "key", "calls", "seconds", "pct_time_sum", "calls_per_iter", "usec_per_iter", "usec_per_call", "calls_per_byte", "usec_per_byte"],
     )
     write_csv(
         args.outdir / "aggregate_category.csv",
         (agg_to_dict(r) for r in agg_cat),
-        ["variant", "bytes", "iterations", "key", "calls", "seconds", "pct_time_sum", "calls_per_iter", "usec_per_iter", "usec_per_call"],
+        ["variant", "bytes", "iterations", "key", "calls", "seconds", "pct_time_sum", "calls_per_iter", "usec_per_iter", "usec_per_call", "calls_per_byte", "usec_per_byte"],
     )
 
     # Elasticities (usec_per_iter is your main “cost” metric)

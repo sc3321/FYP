@@ -1,0 +1,3 @@
+- One main testbench harness which is common to all programs. 
+- Inside this harness, specify which of the 3 runtimes will be used as a runtime arg
+- Inside this harness, specify which of the 

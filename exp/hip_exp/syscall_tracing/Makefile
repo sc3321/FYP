@@ -47,8 +47,6 @@ BASELINE_EXE := $(BUILD_DIR)/baseline
 ALLOC_EXE    := $(BUILD_DIR)/alloc
 KERNELS_EXE  := $(BUILD_DIR)/kernels
 
-# Kernel iterations (override: make KERNEL_ITERS=1000)
-KERNEL_ITERS ?= 1
 
 # ---------- phony targets ----------
 .PHONY: all clean info
@@ -78,7 +76,7 @@ $(ALLOC_EXE): $(SRC) | $(BUILD_DIR)
 
 # Kernels variant: HIP-CPU include + (optional) runtime lib
 $(KERNELS_EXE): $(SRC) | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $< -o $@ -DUSE_HIP -DMODE_KERNELS -DKERNEL_ITERS=$(KERNEL_ITERS) \
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $< -o $@ -DUSE_HIP -DMODE_KERNELS \
 	  $(HIPCPU_LDFLAGS) $(HIPCPU_LDLIBS)
 
 clean:

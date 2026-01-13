@@ -1,0 +1,31 @@
+Today was an interesting day where I learnt a lot about how real production C/C++ projects are compiled and built. I learnt about the linker and some good ways to organise a testbench architecture. 
+
+The main thing that I learnt about the linker was the following:
+
+
+In a situation with 3 different executables for instance:
+a, b, c
+
+
+It makes sense to have 3 different executables if they are linked against completely different runtime libraries etc. I.e in this situation, they correspond to 3 distinctly different runtimes so each of them has completely different function calls linked to completely different libraries etc.
+
+When we actually build these 3 different executables, we can use a helper function or "wrapper" which calls the testbench. This wrapper can remain AGNOSTIC to the underlying hardware and runtime, that is the key. 
+
+By using the linker effectively, we can do something like the following:
+
+Make A : compile against common sources + A specific implementation of the backend functions.
+Make B : ...                            + B ....
+...
+..
+.
+
+
+When the executable "a" is called for instance, the wrapper function will call a function say foo. foo has been implmented in backend_a.cc but there also exists backend_b.cc ...
+
+However, due to the fact that A has been compiled against only A specific backend implementations, the function foo has been linked against the compiled backend_a.cc implementation of foo only and the linker will only the symbols corresponding to foo in backend_a.cc implementation. 
+
+There is no confusion with the different implementations of foo in backend_b ...
+
+This is important because foo is entrusted to do the same exact implementations in both backend_a.cc ...
+
+However, in my case for example backend_a may be for investigating the hip runtime. Therefore foo will be implemented using hip_malloc etc. while in backend_b foo will be implemented using cuda_malloc for instance. 

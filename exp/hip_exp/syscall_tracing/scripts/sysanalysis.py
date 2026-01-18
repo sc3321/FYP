@@ -183,21 +183,44 @@ def elasticity(y1: float, y2: float, x1: float, x2: float) -> float:
         return float("nan")
     return num / den
 
-
-def bucket_syscall(syscall: str, custom: Optional[Dict[str, str]] = None) -> str:
+bucket_syscall(syscall: str, custom: Optional[Dict[str, str]] = None) -> str:
+    """
+    Returns one of: memory, sync, control_io, file_io, other
+    custom overrides take priority.
+    """
     if custom and syscall in custom:
         return custom[syscall]
-    s = syscall.lower()
-    if s in {"mmap", "munmap", "brk", "mprotect", "madvise"}:
-        return "memory"
-    if s in {"futex", "sched_yield", "nanosleep", "clock_nanosleep"}:
-        return "sync"
-    if s in {"ioctl", "poll", "ppoll", "epoll_wait", "epoll_pwait", "select", "pselect6"}:
-        return "control_io"
-    if s in {"read", "write", "pread64", "pwrite64", "openat", "close", "lseek", "fcntl"}:
-        return "file_io"
-    return "other"
 
+    s = syscall.lower()
+
+    # memory / VM
+    if s in {"mmap", "munmap", "brk", "mprotect", "madvise", "mremap"}:
+        return "memory"
+
+    # sync / waiting
+    if s in {
+        "futex", "sched_yield", "nanosleep", "clock_nanosleep",
+        "poll", "ppoll", "select", "pselect6", "epoll_wait", "epoll_pwait"
+    }:
+        return "sync"
+
+    # file IO
+    if s in {
+        "open", "openat", "close", "read", "readv", "pread64",
+        "write", "writev", "pwrite64", "lseek", "fcntl",
+        "stat", "fstat", "newfstatat", "access"
+    }:
+        return "file_io"
+
+    # control / process / driver control
+    if s in {
+        "ioctl", "clone", "fork", "vfork", "execve", "exit", "exit_group",
+        "getpid", "gettid", "set_tid_address", "prlimit64", "arch_prctl",
+        "rt_sigaction", "rt_sigprocmask", "sigaltstack", "getrandom"
+    }:
+        return "control_io"
+
+    return "other"
 
 @dataclass(frozen=True)
 class AggRow:

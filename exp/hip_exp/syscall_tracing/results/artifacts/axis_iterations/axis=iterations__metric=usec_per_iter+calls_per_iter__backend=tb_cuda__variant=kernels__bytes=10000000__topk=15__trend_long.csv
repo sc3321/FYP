@@ -1,4 +1,5 @@
 metric,axis_value,key,value
+calls_per_iter,100,arch_prctl,0.01
 calls_per_iter,100,brk,0.03
 calls_per_iter,100,close,0.08
 calls_per_iter,100,fstat,0.08
@@ -10,7 +11,10 @@ calls_per_iter,100,newfstatat,0.07
 calls_per_iter,100,openat,0.22
 calls_per_iter,100,prlimit64,0.01
 calls_per_iter,100,read,0.08
+calls_per_iter,100,rseq,0.01
+calls_per_iter,100,set_robust_list,0.01
 calls_per_iter,100,set_tid_address,0.01
+calls_per_iter,5000,arch_prctl,0.0002
 calls_per_iter,5000,brk,0.0006
 calls_per_iter,5000,close,0.0016
 calls_per_iter,5000,fstat,0.0016
@@ -22,7 +26,10 @@ calls_per_iter,5000,newfstatat,0.0014
 calls_per_iter,5000,openat,0.0044
 calls_per_iter,5000,prlimit64,0.0002
 calls_per_iter,5000,read,0.0016
+calls_per_iter,5000,rseq,0.0002
+calls_per_iter,5000,set_robust_list,0.0002
 calls_per_iter,5000,set_tid_address,0.0002
+calls_per_iter,10000,arch_prctl,0.0001
 calls_per_iter,10000,brk,0.0003
 calls_per_iter,10000,close,0.0008
 calls_per_iter,10000,fstat,0.0008
@@ -34,7 +41,10 @@ calls_per_iter,10000,newfstatat,0.0007
 calls_per_iter,10000,openat,0.0022
 calls_per_iter,10000,prlimit64,0.0001
 calls_per_iter,10000,read,0.0008
+calls_per_iter,10000,rseq,0.0001
+calls_per_iter,10000,set_robust_list,0.0001
 calls_per_iter,10000,set_tid_address,0.0001
+calls_per_iter,50000,arch_prctl,2e-05
 calls_per_iter,50000,brk,6e-05
 calls_per_iter,50000,close,0.00016
 calls_per_iter,50000,fstat,0.00016
@@ -46,7 +56,10 @@ calls_per_iter,50000,newfstatat,0.00014
 calls_per_iter,50000,openat,0.00044
 calls_per_iter,50000,prlimit64,2e-05
 calls_per_iter,50000,read,0.00016
+calls_per_iter,50000,rseq,2e-05
+calls_per_iter,50000,set_robust_list,2e-05
 calls_per_iter,50000,set_tid_address,2e-05
+calls_per_iter,100000,arch_prctl,1e-05
 calls_per_iter,100000,brk,3e-05
 calls_per_iter,100000,close,8e-05
 calls_per_iter,100000,fstat,8e-05
@@ -58,7 +71,10 @@ calls_per_iter,100000,newfstatat,7e-05
 calls_per_iter,100000,openat,0.00022
 calls_per_iter,100000,prlimit64,1e-05
 calls_per_iter,100000,read,8e-05
+calls_per_iter,100000,rseq,1e-05
+calls_per_iter,100000,set_robust_list,1e-05
 calls_per_iter,100000,set_tid_address,1e-05
+usec_per_iter,100,arch_prctl,0.03
 usec_per_iter,100,brk,0.08
 usec_per_iter,100,close,0.06
 usec_per_iter,100,fstat,0.04
@@ -70,7 +86,10 @@ usec_per_iter,100,newfstatat,0.0
 usec_per_iter,100,openat,0.13
 usec_per_iter,100,prlimit64,0.04
 usec_per_iter,100,read,0.04
+usec_per_iter,100,rseq,0.03
+usec_per_iter,100,set_robust_list,0.03
 usec_per_iter,100,set_tid_address,0.04
+usec_per_iter,5000,arch_prctl,0.0006
 usec_per_iter,5000,brk,0.0
 usec_per_iter,5000,close,0.0054
 usec_per_iter,5000,fstat,0.006
@@ -82,7 +101,10 @@ usec_per_iter,5000,newfstatat,0.0074
 usec_per_iter,5000,openat,0.0346
 usec_per_iter,5000,prlimit64,0.0
 usec_per_iter,5000,read,0.0062
+usec_per_iter,5000,rseq,0.0006
+usec_per_iter,5000,set_robust_list,0.0006
 usec_per_iter,5000,set_tid_address,0.0006
+usec_per_iter,10000,arch_prctl,0.0004
 usec_per_iter,10000,brk,0.0015
 usec_per_iter,10000,close,0.0029
 usec_per_iter,10000,fstat,0.0031
@@ -94,7 +116,10 @@ usec_per_iter,10000,newfstatat,0.0039
 usec_per_iter,10000,openat,0.0177
 usec_per_iter,10000,prlimit64,0.0005
 usec_per_iter,10000,read,0.0032
+usec_per_iter,10000,rseq,0.0003
+usec_per_iter,10000,set_robust_list,0.0004
 usec_per_iter,10000,set_tid_address,0.0003
+usec_per_iter,50000,arch_prctl,0.0
 usec_per_iter,50000,brk,0.0
 usec_per_iter,50000,close,0.0
 usec_per_iter,50000,fstat,0.0
@@ -106,7 +131,10 @@ usec_per_iter,50000,newfstatat,0.0
 usec_per_iter,50000,openat,0.0
 usec_per_iter,50000,prlimit64,0.0
 usec_per_iter,50000,read,0.0
+usec_per_iter,50000,rseq,0.0
+usec_per_iter,50000,set_robust_list,0.0
 usec_per_iter,50000,set_tid_address,0.0
+usec_per_iter,100000,arch_prctl,3e-05
 usec_per_iter,100000,brk,6e-05
 usec_per_iter,100000,close,0.0003
 usec_per_iter,100000,fstat,0.00031
@@ -118,4 +146,6 @@ usec_per_iter,100000,newfstatat,0.00046
 usec_per_iter,100000,openat,0.00181
 usec_per_iter,100000,prlimit64,0.0
 usec_per_iter,100000,read,0.00033
+usec_per_iter,100000,rseq,3e-05
+usec_per_iter,100000,set_robust_list,3e-05
 usec_per_iter,100000,set_tid_address,3e-05

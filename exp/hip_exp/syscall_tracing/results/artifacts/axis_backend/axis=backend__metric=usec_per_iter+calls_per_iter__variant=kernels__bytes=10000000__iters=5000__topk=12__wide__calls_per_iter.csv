@@ -1,3 +1,0 @@
-backend,access,arch_prctl,brk,close,fstat,mmap,mprotect,munmap,newfstatat,openat,pread64,read
-tb_cpu,0.0002,0.0002,0.0006,0.0008,0.0008,0.0042,0.0012,,0.0016,0.003,0.0004,0.0008
-tb_cuda,0.0002,0.0002,0.0006,0.0016,0.0016,0.0078,0.0022,0.0004,0.0014,0.0044,0.0004,0.0016

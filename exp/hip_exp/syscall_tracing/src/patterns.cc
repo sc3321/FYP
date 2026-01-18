@@ -65,8 +65,15 @@ void Patterns::device_kernels(Backend& b, int bytes, int iterations, int* base_a
     for (int it = 0; it < iterations; ++it) {
         b.add_one(d, N);
         b.sync();
-    }
+        
+        if(it % 1000 == 0){
+            b.d2h(base_array, d, (std::size_t)bytes);
+            std::printf("progress it=%d host[0]=%d\n", it, base_array[0]);
+        }
 
+
+    }
+    
     b.d2h(host, d, (std::size_t)bytes);
     b.dev_free(d);
 

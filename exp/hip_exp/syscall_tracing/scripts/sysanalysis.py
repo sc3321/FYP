@@ -183,7 +183,7 @@ def elasticity(y1: float, y2: float, x1: float, x2: float) -> float:
         return float("nan")
     return num / den
 
-bucket_syscall(syscall: str, custom: Optional[Dict[str, str]] = None) -> str:
+def bucket_syscall(syscall: str, custom: Optional[Dict[str, str]] = None) -> str:
     """
     Returns one of: memory, sync, control_io, file_io, other
     custom overrides take priority.

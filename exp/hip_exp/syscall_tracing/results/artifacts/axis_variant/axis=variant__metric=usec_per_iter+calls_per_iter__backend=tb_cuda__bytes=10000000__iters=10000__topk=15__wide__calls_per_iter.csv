@@ -1,0 +1,4 @@
+variant,control_io,file_io,memory,other,sync
+alloc,0.0011,0.0141,0.0113,0.0004,0.0004
+baseline,0.0011,0.0141,0.0113,0.0004,0.0004
+kernels,0.0011,0.0141,0.0113,0.0004,0.0004

@@ -1,3 +1,3 @@
-backend,access,brk,close,execve,fstat,futex,getrandom,mmap,mprotect,munmap,newfstatat,openat,pread64,prlimit64,read
-tb_cpu,0.0005,0.0012,0.0015,0.023,0.0014,0.0004,0.0004,0.0157,0.004,,0.0044,0.0096,0.0008,0.0004,0.0017
-tb_cuda,0.0006,0.0015,0.0029,0.004,0.0031,0.001,0.0005,0.0294,0.01,0.001,0.0039,0.0177,0.0008,0.0005,0.0032
+backend,file_io,memory,other,sync
+tb_cpu,0.0136,0.0209,0.0315,0.0004
+tb_cuda,0.0245999999999999,0.0419,0.0139999999999999,0.001

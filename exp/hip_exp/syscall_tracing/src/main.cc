@@ -3,11 +3,11 @@
 #include <stdlib.h>
 #include <cstdio>
 #include "../include/harness.h"
-
+#include "../include/backend_factory.h"
 
 int main(int argc, char *argv[]){
    
-    if(argc != 3){
+    if(argc != 4){
         printf("Expected 3 arguments \n");
         return 0;
     } 
@@ -19,11 +19,9 @@ int main(int argc, char *argv[]){
     const int N = bytes / sizeof(int);
     if (N <= 0) { std::fprintf(stderr, "N=%d (bytes=%d) too small\n", N, bytes); std::exit(1); }
       return 0;
-   
+
+    static Backend* B = make_backend();
     
-
-    int ret = 0;
-    ret = run(N, iterations, variant);
+    return run(N, iterations, variant, *B);
         
-
 }

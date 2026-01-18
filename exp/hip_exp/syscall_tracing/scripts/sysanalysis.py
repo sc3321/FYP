@@ -4,21 +4,22 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
-# ----------------------------
-# Parsing utilities (from your current code)
-# ----------------------------
-import re
 
-MB = 1024 * 1024
-KB = 1024
+# =============================================================================
+# Parsing
+# =============================================================================
 
-PARAM_RE = re.compile(
-    r"(?P<size>\d+)\s*(?P<unit>mb|kb|b)(?:[^0-9A-Za-z]|_).*?(?P<iters>\d+)\s*(?:iters|iter)",
+# New filename format from your sweep script:
+#   alloc_1000000b_5000iters_rep1.txt
+#   kernels_10485760b_10000iters_rep2.txt
+FNAME_RE = re.compile(
+    r"^(?P<variant>alloc|baseline|kernels)_(?P<bytes>\d+)b_(?P<iters>\d+)iters_rep(?P<rep>\d+)\.txt$",
     re.IGNORECASE,
 )
 
@@ -36,21 +37,34 @@ ROW_RE = re.compile(
     re.VERBOSE,
 )
 
-def parse_params_from_name(filename: str) -> Optional[Tuple[int, int]]:
-    m = PARAM_RE.search(filename)
+
+def parse_filename(fp: Path) -> Optional[Tuple[str, int, int, int]]:
+    """
+    Returns (variant, bytes, iters, rep) or None if not matching.
+    """
+    m = FNAME_RE.match(fp.name)
     if not m:
         return None
-    size = int(m.group("size"))
-    unit = m.group("unit").lower()
-    iters = int(m.group("iters"))
+    return (
+        m.group("variant").lower(),
+        int(m.group("bytes")),
+        int(m.group("iters")),
+        int(m.group("rep")),
+    )
 
-    if unit == "mb":
-        bytes_ = size * MB
-    elif unit == "kb":
-        bytes_ = size * KB
-    else:
-        bytes_ = size
-    return bytes_, iters
+
+def infer_backend(fp: Path) -> Optional[str]:
+    """
+    Expects results layout:
+      results/tb_cpu/run_xxx/alloc_...txt
+      results/tb_cuda/run_xxx/...
+    Returns "tb_cpu" / "tb_cuda" / "tb_hip" if present in path.
+    """
+    for part in fp.parts:
+        if part.startswith("tb_"):
+            return part
+    return None
+
 
 def parse_strace_c(text: str) -> List[Dict[str, object]]:
     rows: List[Dict[str, object]] = []
@@ -62,7 +76,6 @@ def parse_strace_c(text: str) -> List[Dict[str, object]]:
             continue
         if set(line) <= {"-", " "}:
             continue
-        # skip the "total" row (different format)
         if line.split() and line.split()[-1] == "total":
             continue
 
@@ -82,28 +95,25 @@ def parse_strace_c(text: str) -> List[Dict[str, object]]:
         )
     return rows
 
+
 @dataclass(frozen=True)
 class Record:
+    backend: str
     variant: str
     bytes: int
     iterations: int
+    rep: int
     syscall: str
     pct_time: float
     calls: int
     seconds: float
-    usecs_per_call: int
 
-def infer_variant(path: Path, variants: List[str]) -> str:
-    for part in path.parts:
-        if part in variants:
-            return part
-    return path.parent.name
 
-def collect_records(results_root: Path, variants: List[str]) -> Tuple[List[Record], Dict[str, int]]:
+def collect_records(results_root: Path, variants: List[str], backends: Optional[List[str]] = None) -> Tuple[List[Record], Dict[str, int]]:
     records: List[Record] = []
     stats = {
         "txt_files_found": 0,
-        "matched_param_filenames": 0,
+        "matched_filenames": 0,
         "files_with_parsed_rows": 0,
         "total_rows_parsed": 0,
     }
@@ -111,15 +121,20 @@ def collect_records(results_root: Path, variants: List[str]) -> Tuple[List[Recor
     for fp in results_root.rglob("*.txt"):
         stats["txt_files_found"] += 1
 
-        variant = infer_variant(fp, variants)
+        backend = infer_backend(fp)
+        if backend is None:
+            continue
+        if backends is not None and backend not in backends:
+            continue
+
+        parsed = parse_filename(fp)
+        if not parsed:
+            continue
+        variant, bytes_, iters, rep = parsed
         if variant not in variants:
             continue
 
-        params = parse_params_from_name(fp.name)
-        if not params:
-            continue
-        stats["matched_param_filenames"] += 1
-        bytes_, iters = params
+        stats["matched_filenames"] += 1
 
         text = fp.read_text(encoding="utf-8", errors="replace")
         rows = parse_strace_c(text)
@@ -132,46 +147,47 @@ def collect_records(results_root: Path, variants: List[str]) -> Tuple[List[Recor
         for r in rows:
             records.append(
                 Record(
+                    backend=backend,
                     variant=variant,
                     bytes=bytes_,
                     iterations=iters,
+                    rep=rep,
                     syscall=str(r["syscall"]),
                     pct_time=float(r["pct_time"]),
                     calls=int(r["calls"]),
                     seconds=float(r["seconds"]),
-                    usecs_per_call=int(r["usecs_per_call"]),
                 )
             )
 
     return records, stats
 
 
-# ----------------------------
-# Analysis layer
-# ----------------------------
+# =============================================================================
+# Aggregation + metrics
+# =============================================================================
 
 def safe_div(a: float, b: float) -> float:
     return a / b if b != 0 else float("nan")
 
+
 def log_ratio(a: float, b: float) -> float:
-    # returns ln(a/b) if both positive else nan
     if a > 0 and b > 0:
         return math.log(a) - math.log(b)
     return float("nan")
 
+
 def elasticity(y1: float, y2: float, x1: float, x2: float) -> float:
-    # E = Δlog(y)/Δlog(x)
     num = log_ratio(y2, y1)
     den = log_ratio(x2, x1)
     if math.isnan(num) or math.isnan(den) or den == 0:
         return float("nan")
     return num / den
 
+
 def bucket_syscall(syscall: str, custom: Optional[Dict[str, str]] = None) -> str:
     if custom and syscall in custom:
         return custom[syscall]
     s = syscall.lower()
-    # default coarse buckets
     if s in {"mmap", "munmap", "brk", "mprotect", "madvise"}:
         return "memory"
     if s in {"futex", "sched_yield", "nanosleep", "clock_nanosleep"}:
@@ -182,78 +198,126 @@ def bucket_syscall(syscall: str, custom: Optional[Dict[str, str]] = None) -> str
         return "file_io"
     return "other"
 
-@dataclass
+
+@dataclass(frozen=True)
 class AggRow:
+    backend: str
     variant: str
     bytes: int
     iterations: int
     key: str  # syscall or category
-    calls: int
+    calls: float
     seconds: float
-    pct_time: float  # sum of pct_time across included syscalls (composition metric only)
+    pct_time: float
 
     # derived
     calls_per_iter: float
     usec_per_iter: float
     usec_per_call: float
-    
     calls_per_byte: float
     usec_per_byte: float
 
-def aggregate(records: List[Record], by: str, bucket_map: Optional[Dict[str, str]]) -> List[AggRow]:
+
+def mean(xs: List[float]) -> float:
+    xs2 = [x for x in xs if not math.isnan(x) and math.isfinite(x)]
+    return sum(xs2) / len(xs2) if xs2 else float("nan")
+
+
+def aggregate_mean_over_reps(
+    records: List[Record],
+    by: str,  # "syscall" or "category"
+    bucket_map: Optional[Dict[str, str]],
+) -> List[AggRow]:
     """
-    by: "syscall" or "category"
+    Two-stage aggregation:
+      1) aggregate within each rep-file run to (backend,variant,bytes,iters,rep,key)
+      2) mean over reps for each (backend,variant,bytes,iters,key)
+
+    Important: if a syscall/category is absent in a rep, we treat it as 0 for that rep.
     """
-    acc: Dict[Tuple[str, int, int, str], Dict[str, float]] = defaultdict(lambda: {"calls": 0.0, "seconds": 0.0, "pct_time": 0.0})
+    assert by in ("syscall", "category")
+
+    # Universe of keys per (backend,variant,bytes,iters)
+    universe: Dict[Tuple[str, str, int, int], set] = defaultdict(set)
+
+    # Stage 1 accum per rep
+    rep_acc: Dict[Tuple[str, str, int, int, int, str], Dict[str, float]] = defaultdict(
+        lambda: {"calls": 0.0, "seconds": 0.0, "pct_time": 0.0}
+    )
+
+    # Count reps per (backend,variant,bytes,iters)
+    rep_counts: Dict[Tuple[str, str, int, int], set] = defaultdict(set)
+
     for r in records:
         key = r.syscall if by == "syscall" else bucket_syscall(r.syscall, bucket_map)
-        k = (r.variant, r.bytes, r.iterations, key)
-        acc[k]["calls"] += r.calls
-        acc[k]["seconds"] += r.seconds
-        acc[k]["pct_time"] += r.pct_time
+        run_key = (r.backend, r.variant, r.bytes, r.iterations)
+        universe[run_key].add(key)
+        rep_counts[run_key].add(r.rep)
 
+        k = (r.backend, r.variant, r.bytes, r.iterations, r.rep, key)
+        rep_acc[k]["calls"] += float(r.calls)
+        rep_acc[k]["seconds"] += float(r.seconds)
+        rep_acc[k]["pct_time"] += float(r.pct_time)
+
+    # Stage 2: mean over reps (including implicit zeros)
     out: List[AggRow] = []
-    for (variant, bytes_, iters, key), v in sorted(acc.items()):
-        calls = int(round(v["calls"]))
-        seconds = float(v["seconds"])
-        pct_time = float(v["pct_time"])
 
-        calls_per_iter = safe_div(calls, iters)
-        usec_per_iter = safe_div(seconds * 1e6, iters)
-        usec_per_call = safe_div(seconds * 1e6, calls)
+    # Iterate runs deterministically
+    for run_key in sorted(universe.keys()):
+        backend, variant, bytes_, iters = run_key
+        reps = sorted(rep_counts.get(run_key, {1}))
+        nreps = len(reps) if reps else 1
 
-        calls_per_byte = safe_div(calls, bytes_)
-        usec_per_byte = safe_div(seconds * 1e6, bytes_)
+        for key in sorted(universe[run_key]):
+            calls_sum = 0.0
+            sec_sum = 0.0
+            pct_sum = 0.0
 
+            for rep in reps:
+                k = (backend, variant, bytes_, iters, rep, key)
+                v = rep_acc.get(k)
+                if v is None:
+                    # absent in this rep -> 0
+                    continue
+                calls_sum += v["calls"]
+                sec_sum += v["seconds"]
+                pct_sum += v["pct_time"]
 
-        out.append(
-            AggRow(
-                variant=variant,
-                bytes=bytes_,
-                iterations=iters,
-                key=key,
-                calls=calls,
-                seconds=seconds,
-                pct_time=pct_time,
-                calls_per_iter=calls_per_iter,
-                usec_per_iter=usec_per_iter,
-                usec_per_call=usec_per_call,
-                calls_per_byte=calls_per_byte,
-                usec_per_byte=usec_per_byte,
+            calls = calls_sum / nreps
+            seconds = sec_sum / nreps
+            pct_time = pct_sum / nreps
+
+            calls_per_iter = safe_div(calls, iters)
+            usec_per_iter = safe_div(seconds * 1e6, iters)
+            usec_per_call = safe_div(seconds * 1e6, calls)
+
+            calls_per_byte = safe_div(calls, bytes_)
+            usec_per_byte = safe_div(seconds * 1e6, bytes_)
+
+            out.append(
+                AggRow(
+                    backend=backend,
+                    variant=variant,
+                    bytes=bytes_,
+                    iterations=iters,
+                    key=key,
+                    calls=calls,
+                    seconds=seconds,
+                    pct_time=pct_time,
+                    calls_per_iter=calls_per_iter,
+                    usec_per_iter=usec_per_iter,
+                    usec_per_call=usec_per_call,
+                    calls_per_byte=calls_per_byte,
+                    usec_per_byte=usec_per_byte,
+                )
             )
-        )
+
     return out
 
-def write_csv(path: Path, rows: Iterable[Dict[str, object]], fieldnames: List[str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=fieldnames)
-        w.writeheader()
-        for r in rows:
-            w.writerow(r)
 
-def top_n_by_metric(agg: List[AggRow], metric: str, n: int) -> List[AggRow]:
-    return sorted(agg, key=lambda r: (getattr(r, metric) if not math.isnan(getattr(r, metric)) else -1e30), reverse=True)[:n]
+# =============================================================================
+# Elasticities + classification
+# =============================================================================
 
 def compute_elasticities(
     agg: List[AggRow],
@@ -263,26 +327,24 @@ def compute_elasticities(
     metric: str,
 ) -> List[Dict[str, object]]:
     """
-    elasticity of metric vs vary, for each (variant, key, focus_value) over adjacent points in vary.
-    focus: "bytes" or "iterations" (held fixed)
-    vary:  "iterations" or "bytes" (varied)
-    focus_values: list of exact held values to evaluate (e.g. bytes=[1e6,5e6,1e7])
+    elasticity of metric vs vary, for each (backend,variant,key,focus_value) over adjacent points in vary.
     """
-    # index: (variant,key,focus_value) -> list of (vary_value, metric_value)
-    idx: Dict[Tuple[str, str, int], List[Tuple[int, float]]] = defaultdict(list)
+    idx: Dict[Tuple[str, str, str, int], List[Tuple[int, float]]] = defaultdict(list)
+
     for r in agg:
         fv = r.bytes if focus == "bytes" else r.iterations
         vv = r.iterations if vary == "iterations" else r.bytes
         if fv in focus_values:
-            idx[(r.variant, r.key, fv)].append((vv, getattr(r, metric)))
+            idx[(r.backend, r.variant, r.key, fv)].append((vv, float(getattr(r, metric))))
 
     out: List[Dict[str, object]] = []
-    for (variant, key, fv), pts in idx.items():
+    for (backend, variant, key, fv), pts in idx.items():
         pts_sorted = sorted(pts, key=lambda t: t[0])
         for (x1, y1), (x2, y2) in zip(pts_sorted, pts_sorted[1:]):
             e = elasticity(y1, y2, x1, x2)
             out.append(
                 {
+                    "backend": backend,
                     "variant": variant,
                     "key": key,
                     focus: fv,
@@ -296,9 +358,8 @@ def compute_elasticities(
             )
     return out
 
+
 def classify_key(elasticity_iters: float, elasticity_bytes: float) -> str:
-    # crude, interpretable bins
-    # (tune thresholds later if you want)
     def ok(x: float) -> bool:
         return not math.isnan(x) and math.isfinite(x)
 
@@ -317,36 +378,32 @@ def classify_key(elasticity_iters: float, elasticity_bytes: float) -> str:
         return "mostly_constant"
     return "mixed"
 
+
 def summarise_classification(
     elast_iters: List[Dict[str, object]],
     elast_bytes: List[Dict[str, object]],
-    focus_bytes: List[int],
-    focus_iters: List[int],
 ) -> List[Dict[str, object]]:
-    """
-    Produce one classification per (variant,key) by averaging available elasticities.
-    """
-    # Average elasticities by (variant,key)
-    def mean(xs: List[float]) -> float:
+    def mean_list(xs: List[float]) -> float:
         xs2 = [x for x in xs if not math.isnan(x) and math.isfinite(x)]
         return sum(xs2) / len(xs2) if xs2 else float("nan")
 
-    e_i: Dict[Tuple[str, str], List[float]] = defaultdict(list)
-    e_b: Dict[Tuple[str, str], List[float]] = defaultdict(list)
+    e_i: Dict[Tuple[str, str, str], List[float]] = defaultdict(list)  # (backend,variant,key) -> [E]
+    e_b: Dict[Tuple[str, str, str], List[float]] = defaultdict(list)
 
     for r in elast_iters:
-        e_i[(r["variant"], r["key"])].append(float(r["elasticity"]))
+        e_i[(r["backend"], r["variant"], r["key"])].append(float(r["elasticity"]))
     for r in elast_bytes:
-        e_b[(r["variant"], r["key"])].append(float(r["elasticity"]))
+        e_b[(r["backend"], r["variant"], r["key"])].append(float(r["elasticity"]))
 
     out: List[Dict[str, object]] = []
     keys = set(e_i.keys()) | set(e_b.keys())
-    for vk in sorted(keys):
-        variant, key = vk
-        mi = mean(e_i.get(vk, []))
-        mb = mean(e_b.get(vk, []))
+    for bk in sorted(keys):
+        backend, variant, key = bk
+        mi = mean_list(e_i.get(bk, []))
+        mb = mean_list(e_b.get(bk, []))
         out.append(
             {
+                "backend": backend,
                 "variant": variant,
                 "key": key,
                 "E_iters_mean": mi,
@@ -357,15 +414,23 @@ def summarise_classification(
     return out
 
 
-# ----------------------------
-# CLI
-# ----------------------------
+# =============================================================================
+# IO helpers
+# =============================================================================
+
+def write_csv(path: Path, rows: Iterable[Dict[str, object]], fieldnames: List[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+
 
 def load_bucket_map(path: Optional[Path]) -> Optional[Dict[str, str]]:
     if not path:
         return None
     m: Dict[str, str] = {}
-    # CSV format: syscall,category
     with path.open("r", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             sc = (row.get("syscall") or "").strip()
@@ -374,75 +439,93 @@ def load_bucket_map(path: Optional[Path]) -> Optional[Dict[str, str]]:
                 m[sc] = cat
     return m
 
+
 def parse_int_list(s: str) -> List[int]:
-    # accepts "1000000,5000000,10000000"
-    out = []
+    out: List[int] = []
     for part in s.split(","):
         part = part.strip()
         if part:
             out.append(int(part))
     return out
 
+
+def aggrow_to_dict(r: AggRow) -> Dict[str, object]:
+    return {
+        "backend": r.backend,
+        "variant": r.variant,
+        "bytes": r.bytes,
+        "iterations": r.iterations,
+        "key": r.key,
+        "calls_mean": r.calls,
+        "seconds_mean": r.seconds,
+        "pct_time_mean": r.pct_time,
+        "calls_per_iter": r.calls_per_iter,
+        "usec_per_iter": r.usec_per_iter,
+        "usec_per_call": r.usec_per_call,
+        "calls_per_byte": r.calls_per_byte,
+        "usec_per_byte": r.usec_per_byte,
+    }
+
+
+def top_n_by_metric(rows: List[AggRow], metric: str, n: int) -> List[AggRow]:
+    def val(r: AggRow) -> float:
+        x = float(getattr(r, metric))
+        return x if (not math.isnan(x) and math.isfinite(x)) else -1e30
+    return sorted(rows, key=val, reverse=True)[:n]
+
+
+# =============================================================================
+# CLI
+# =============================================================================
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Numerical analysis for strace -c sweeps (elasticities, per-iter metrics).")
-    ap.add_argument("--results-root", type=Path, required=True, help="Root directory containing strace .txt outputs.")
-    ap.add_argument("--variants", type=str, default="baseline,alloc,kernels", help="Comma-separated variant folder names.")
-    ap.add_argument("--bytes", type=str, default="1000000,5000000,10000000", help="Comma-separated bytes sweep points.")
-    ap.add_argument("--iters", type=str, default="100,5000,100000", help="Comma-separated iteration sweep points.")
+    ap = argparse.ArgumentParser(description="Numerical analysis for strace -c sweeps (with backend + repeat aggregation).")
+    ap.add_argument("--results-root", type=Path, required=True, help="Root directory containing results/tb_*/run_*/ files.")
+    ap.add_argument("--variants", type=str, default="baseline,alloc,kernels", help="Comma-separated variants.")
+    ap.add_argument("--backends", type=str, default="", help="Optional comma-separated backends (e.g. tb_cpu,tb_cuda). Empty=auto.")
+    ap.add_argument("--bytes", type=str, default="1000000,5000000,10000000", help="Comma-separated bytes points (for elasticities).")
+    ap.add_argument("--iters", type=str, default="100,5000,100000", help="Comma-separated iteration points (for elasticities).")
     ap.add_argument("--bucket-map", type=Path, default=None, help="Optional CSV mapping: syscall,category")
-    ap.add_argument("--outdir", type=Path, default=Path("analysis_out"), help="Output directory.")
-    ap.add_argument("--topn", type=int, default=15, help="Top N syscalls/categories to dump by time_per_iter.")
+    ap.add_argument("--outdir", type=Path, default=Path("results/artifacts/statistics"), help="Output directory.")
+    ap.add_argument("--topn", type=int, default=15, help="Top N syscalls/categories to print by usec_per_iter.")
     args = ap.parse_args()
 
     variants = [v.strip() for v in args.variants.split(",") if v.strip()]
     bytes_points = parse_int_list(args.bytes)
     iters_points = parse_int_list(args.iters)
 
+    backends = [b.strip() for b in args.backends.split(",") if b.strip()] or None
     bucket_map = load_bucket_map(args.bucket_map)
 
-    records, stats = collect_records(args.results_root, variants)
+    records, stats = collect_records(args.results_root, variants, backends)
 
     print("== Parse stats ==")
     for k, v in stats.items():
         print(f"{k}: {v}")
     print(f"records: {len(records)}")
     if not records:
-        print("No records parsed. Check --results-root, --variants, and filename pattern.")
+        print("No records parsed. Check --results-root and filename pattern.")
         return 2
 
-    # Aggregate
-    agg_sys = aggregate(records, by="syscall", bucket_map=bucket_map)
-    agg_cat = aggregate(records, by="category", bucket_map=bucket_map)
+    # Aggregate (mean across reps)
+    agg_sys = aggregate_mean_over_reps(records, by="syscall", bucket_map=bucket_map)
+    agg_cat = aggregate_mean_over_reps(records, by="category", bucket_map=bucket_map)
 
     # Write aggregate tables
-    def agg_to_dict(r: AggRow) -> Dict[str, object]:
-        return {
-            "variant": r.variant,
-            "bytes": r.bytes,
-            "iterations": r.iterations,
-            "key": r.key,
-            "calls": r.calls,
-            "seconds": r.seconds,
-            "pct_time_sum": r.pct_time,
-            "calls_per_iter": r.calls_per_iter,
-            "usec_per_iter": r.usec_per_iter,
-            "usec_per_call": r.usec_per_call,
-            "calls_per_byte": r.calls_per_byte,
-            "usec_per_byte": r.usec_per_byte,
-        }
-
     write_csv(
         args.outdir / "aggregate_syscall.csv",
-        (agg_to_dict(r) for r in agg_sys),
-        ["variant", "bytes", "iterations", "key", "calls", "seconds", "pct_time_sum", "calls_per_iter", "usec_per_iter", "usec_per_call", "calls_per_byte", "usec_per_byte"],
+        (aggrow_to_dict(r) for r in agg_sys),
+        ["backend","variant","bytes","iterations","key","calls_mean","seconds_mean","pct_time_mean",
+         "calls_per_iter","usec_per_iter","usec_per_call","calls_per_byte","usec_per_byte"],
     )
     write_csv(
         args.outdir / "aggregate_category.csv",
-        (agg_to_dict(r) for r in agg_cat),
-        ["variant", "bytes", "iterations", "key", "calls", "seconds", "pct_time_sum", "calls_per_iter", "usec_per_iter", "usec_per_call", "calls_per_byte", "usec_per_byte"],
+        (aggrow_to_dict(r) for r in agg_cat),
+        ["backend","variant","bytes","iterations","key","calls_mean","seconds_mean","pct_time_mean",
+         "calls_per_iter","usec_per_iter","usec_per_call","calls_per_byte","usec_per_byte"],
     )
 
-    # Elasticities (usec_per_iter is your main “cost” metric)
+    # Elasticities (usec_per_iter is the primary cost metric)
     elast_iters_sys = compute_elasticities(
         agg_sys, focus="bytes", focus_values=bytes_points, vary="iterations", metric="usec_per_iter"
     )
@@ -460,53 +543,55 @@ def main() -> int:
     write_csv(
         args.outdir / "elasticity_iters_syscall.csv",
         elast_iters_sys,
-        ["variant", "key", "bytes", "vary_x1", "vary_x2", "metric", "y1", "y2", "elasticity"],
+        ["backend","variant","key","bytes","vary_x1","vary_x2","metric","y1","y2","elasticity"],
     )
     write_csv(
         args.outdir / "elasticity_bytes_syscall.csv",
         elast_bytes_sys,
-        ["variant", "key", "iterations", "vary_x1", "vary_x2", "metric", "y1", "y2", "elasticity"],
+        ["backend","variant","key","iterations","vary_x1","vary_x2","metric","y1","y2","elasticity"],
     )
     write_csv(
         args.outdir / "elasticity_iters_category.csv",
         elast_iters_cat,
-        ["variant", "key", "bytes", "vary_x1", "vary_x2", "metric", "y1", "y2", "elasticity"],
+        ["backend","variant","key","bytes","vary_x1","vary_x2","metric","y1","y2","elasticity"],
     )
     write_csv(
         args.outdir / "elasticity_bytes_category.csv",
         elast_bytes_cat,
-        ["variant", "key", "iterations", "vary_x1", "vary_x2", "metric", "y1", "y2", "elasticity"],
+        ["backend","variant","key","iterations","vary_x1","vary_x2","metric","y1","y2","elasticity"],
     )
 
     # Classification (averaged elasticities)
-    class_sys = summarise_classification(elast_iters_sys, elast_bytes_sys, bytes_points, iters_points)
-    class_cat = summarise_classification(elast_iters_cat, elast_bytes_cat, bytes_points, iters_points)
+    class_sys = summarise_classification(elast_iters_sys, elast_bytes_sys)
+    class_cat = summarise_classification(elast_iters_cat, elast_bytes_cat)
 
     write_csv(
         args.outdir / "classification_syscall.csv",
         class_sys,
-        ["variant", "key", "E_iters_mean", "E_bytes_mean", "class"],
+        ["backend","variant","key","E_iters_mean","E_bytes_mean","class"],
     )
     write_csv(
         args.outdir / "classification_category.csv",
         class_cat,
-        ["variant", "key", "E_iters_mean", "E_bytes_mean", "class"],
+        ["backend","variant","key","E_iters_mean","E_bytes_mean","class"],
     )
 
-    # Dump a quick “top N” report per variant/config (syscalls + categories)
+    # Top-N report (by usec_per_iter) at the focus points
     def dump_top(agg: List[AggRow], label: str) -> None:
         print(f"\n== Top {args.topn} by usec_per_iter ({label}) ==")
-        # group by (variant,bytes,iters)
-        groups: Dict[Tuple[str, int, int], List[AggRow]] = defaultdict(list)
+        groups: Dict[Tuple[str, str, int, int], List[AggRow]] = defaultdict(list)
         for r in agg:
             if (r.bytes in bytes_points) and (r.iterations in iters_points):
-                groups[(r.variant, r.bytes, r.iterations)].append(r)
+                groups[(r.backend, r.variant, r.bytes, r.iterations)].append(r)
 
-        for (variant, b, it), rows in sorted(groups.items()):
+        for (backend, variant, b, it), rows in sorted(groups.items()):
             top = top_n_by_metric(rows, "usec_per_iter", args.topn)
-            print(f"\n-- {variant} | bytes={b} | iters={it} --")
+            print(f"\n-- {backend} | {variant} | bytes={b} | iters={it} --")
             for r in top:
-                print(f"{r.key:20s}  usec/iter={r.usec_per_iter:10.2f}  calls/iter={r.calls_per_iter:10.4f}  usec/call={r.usec_per_call:10.2f}")
+                print(
+                    f"{r.key:20s}  usec/iter={r.usec_per_iter:10.2f}  "
+                    f"calls/iter={r.calls_per_iter:10.4f}  usec/call={r.usec_per_call:10.2f}"
+                )
 
     dump_top(agg_sys, "syscall")
     dump_top(agg_cat, "category")
@@ -514,6 +599,6 @@ def main() -> int:
     print(f"\nWrote analysis CSVs to: {args.outdir.resolve()}")
     return 0
 
+
 if __name__ == "__main__":
     raise SystemExit(main())
-

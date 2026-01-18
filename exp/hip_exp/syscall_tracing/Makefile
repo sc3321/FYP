@@ -1,84 +1,91 @@
-# ---------- toolchain ----------
-CXX := g++
-CXXFLAGS := -std=c++17 -O2 -Wall -Wextra -Wpedantic -pthread
+# syscall_tracing/Makefile
 
-SRC_DIR := src
-BUILD_DIR := build
-SRC := $(SRC_DIR)/trace.cc
+# ---------- Project dirs ----------
+ROOT     := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+SRC_DIR  := $(ROOT)/src
+INC_DIR  := $(ROOT)/include
+BUILD    := $(ROOT)/build
+OBJ_DIR  := $(BUILD)/obj
+BIN_DIR  := $(BUILD)/bin
 
-# ---------- HIP-CPU configuration ----------
-# Default to a local checkout at ~/HIP-CPU. Override like:
-#   make HIPCPU_HOME=/path/to/HIP-CPU
-HIPCPU_HOME ?= $(HOME)/HIP-CPU
+# ---------- Toolchains ----------
+CXX      := g++
+NVCC     := nvcc
+# If you use hipcc for HIP, swap CXX -> hipcc for HIP target below.
 
-# Mode:
-#  - local: use HIPCPU_HOME
-#  - installed: use /usr/local
-HIPCPU_MODE ?= local
+# ---------- Flags ----------
+CXXFLAGS   := -O2 -std=c++17 -I$(INC_DIR) -Wall -Wextra
+NVCCFLAGS  := -O2 -std=c++17 -I$(INC_DIR)
+LDFLAGS    :=
 
-ifeq ($(HIPCPU_MODE),installed)
-  HIPCPU_INC := /usr/local/include
-  HIPCPU_LIB := /usr/local/lib
-else
-  HIPCPU_INC := $(HIPCPU_HOME)/include
+CUDA_LIBS  := -lcudart
 
-  # Try to locate the HIP-CPU runtime shared library directory (if it exists).
-  # If it doesn't exist, we will build assuming header-only usage of the APIs.
-  HIPCPU_LIB := $(shell find $(HIPCPU_HOME)/build -maxdepth 4 -type f -name "libhip_cpu_rt.so" -printf "%h\n" 2>/dev/null | head -n 1)
-endif
+# ---------- Sources ----------
+COMMON_SRC := \
+  $(SRC_DIR)/main.cc \
+  $(SRC_DIR)/harness.cc \
+  $(SRC_DIR)/patterns.cc
 
-# ---------- link flags (auto fallback if libhip_cpu_rt isn't present) ----------
-# TBB + dl are needed by HIP-CPU.
-LDLIBS_BASE := -ltbb -ldl
+CPU_BACKEND_SRC  := $(SRC_DIR)/backend/cpu.cc
+# HIP_BACKEND_SRC  := $(SRC_DIR)/backends/hip.cc
+CUDA_BACKEND_SRC := $(SRC_DIR)/backend/cuda.cu
 
-# If HIPCPU_LIB is empty (local mode and no lib found), don't try to link -lhip_cpu_rt.
-ifeq ($(strip $(HIPCPU_LIB)),)
-  HIPCPU_LDFLAGS :=
-  HIPCPU_LDLIBS  := $(LDLIBS_BASE)
-else
-  HIPCPU_LDFLAGS := -L$(HIPCPU_LIB) -Wl,-rpath,$(HIPCPU_LIB)
-  HIPCPU_LDLIBS  := -lhip_cpu_rt $(LDLIBS_BASE)
-endif
+# ---------- Objects (in build/obj, preserving paths) ----------
+# turn /abs/path/src/foo.cc into build/obj/src/foo.o
+COMMON_OBJ := $(patsubst $(ROOT)/%.cc,$(OBJ_DIR)/%.o,$(COMMON_SRC))
 
-INCLUDES := -I$(HIPCPU_INC)
+CPU_BACKEND_OBJ  := $(patsubst $(ROOT)/%.cc,$(OBJ_DIR)/%.o,$(CPU_BACKEND_SRC))
+# HIP_BACKEND_OBJ  := $(patsubst $(ROOT)/%.cc,$(OBJ_DIR)/%.o,$(HIP_BACKEND_SRC))
+CUDA_BACKEND_OBJ := $(patsubst $(ROOT)/%.cu,$(OBJ_DIR)/%.o,$(CUDA_BACKEND_SRC))
 
-# ---------- outputs ----------
-BASELINE_EXE := $(BUILD_DIR)/baseline
-ALLOC_EXE    := $(BUILD_DIR)/alloc
-KERNELS_EXE  := $(BUILD_DIR)/kernels
+# ---------- Binaries ----------
+TB_CPU  := $(BIN_DIR)/tb_cpu
+# TB_HIP  := $(BIN_DIR)/tb_hip
+TB_CUDA := $(BIN_DIR)/tb_cuda
 
+.PHONY: all clean dirs cpu hip cuda
 
-# ---------- phony targets ----------
-.PHONY: all clean info
+all: dirs $(TB_CPU) $(TB_CUDA)
+dirs:
+	@mkdir -p $(OBJ_DIR) $(BIN_DIR)
 
-all: $(BASELINE_EXE) $(ALLOC_EXE) $(KERNELS_EXE)
+# ============================================================
+# Link rules
+# ============================================================
 
-info:
-	@echo "HIPCPU_MODE=$(HIPCPU_MODE)"
-	@echo "HIPCPU_HOME=$(HIPCPU_HOME)"
-	@echo "HIPCPU_INC=$(HIPCPU_INC)"
-	@echo "HIPCPU_LIB=$(HIPCPU_LIB)"
-	@echo "HIPCPU_LDFLAGS=$(HIPCPU_LDFLAGS)"
-	@echo "HIPCPU_LDLIBS=$(HIPCPU_LDLIBS)"
-	@echo "CXX=$(CXX)"
+$(TB_CPU):  $(COMMON_OBJ) $(CPU_BACKEND_OBJ) | dirs
+	$(CXX) $^ $(LDFLAGS) -o $@
 
-$(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
+# $(TB_HIP):  $(COMMON_OBJ) $(HIP_BACKEND_OBJ) | dirs
+#	$(CXX) $^ $(LDFLAGS) -o $@
 
-# ---------- builds ----------
-# Baseline stays minimal: no HIP include/lib needed.
-$(BASELINE_EXE): $(SRC) | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $< -o $@ -DBASELINE
+$(TB_CUDA): $(COMMON_OBJ) $(CUDA_BACKEND_OBJ) | dirs
+	$(NVCC) $^ $(CUDA_LIBS) -o $@
 
-# Alloc variant: HIP-CPU include + (optional) runtime lib
-$(ALLOC_EXE): $(SRC) | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $< -o $@ -DALLOC $(HIPCPU_LDFLAGS) $(HIPCPU_LDLIBS)
+# Convenience targets
+cpu:  dirs $(TB_CPU)
+# hip:  dirs $(TB_HIP)
+cuda: dirs $(TB_CUDA)
 
-# Kernels variant: HIP-CPU include + (optional) runtime lib
-$(KERNELS_EXE): $(SRC) | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $< -o $@ -DUSE_HIP -DMODE_KERNELS \
-	  $(HIPCPU_LDFLAGS) $(HIPCPU_LDLIBS)
+# ============================================================
+# Compile rules (objects in build/obj/...)
+# Each rule ensures the parent directory exists.
+# ============================================================
+
+# C++ sources
+$(OBJ_DIR)/%.o: $(ROOT)/%.cc
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# CUDA sources
+$(OBJ_DIR)/%.o: $(ROOT)/%.cu
+	@mkdir -p $(dir $@)
+	$(NVCC) $(NVCCFLAGS) -c $< -o $@
+
+# ============================================================
+# Clean
+# ============================================================
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD)
 

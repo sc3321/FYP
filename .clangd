@@ -1,0 +1,8 @@
+CompileFlags:
+  Add:
+    - -Iinclude
+    - -I/vol/cuda/12.9.0/include
+    - --cuda-path=/vol/cuda/12.9.0
+    - -x
+    - cuda
+

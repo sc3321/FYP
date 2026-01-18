@@ -1,4 +1,0 @@
-variant,control_io,file_io,memory,other,sync
-alloc,1e-05,0.00017,0.00045,0.00018,1.00026
-baseline,1e-05,0.00017,0.00046,0.00018,4e-05
-kernels,2e-05,0.00096,0.00388,0.0006,0.00021

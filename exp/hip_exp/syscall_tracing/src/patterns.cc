@@ -1,50 +1,80 @@
 #include "../include/patterns.h"
+#include <cassert>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
-void Patterns::device_alloc(int bytes, int iterations, int* base_array){
-  Backend* DuT = new Backend();
-  for(int i = 0; i < iterations; ++i){
-      int* dev_ptr = nullptr;
-      DuT->dev_malloc();
-      DuT->dev_free();
-  }
-}
 
-
-void Patterns::device_baseline(int bytes, int iterations, int* base_array){
-    Backend* DuT = new Backend();
-    int* bptr = (int*)std::malloc(bytes * sizeof(int));
-    memcpy(bptr, base_array, bytes * sizeof(int));
-    for(int i = 0; i < iterations; ++i){
-        bptr[i]++;
+void Patterns::device_alloc(Backend& b, int bytes, int iterations, int* base_array) {
+    for (int it = 0; it < iterations; ++it) {
+        void* d = b.dev_malloc((std::size_t)bytes);        
+        if(!d){ 
+            std::fprintf(stderr, "dev_malloc returned null\n"); 
+            std::exit(1); 
+        }
+        b.dev_free(d);
     }
 }
 
+void Patterns::device_baseline(Backend& b, int bytes, int iterations, int* base_array) {
+    const int N = bytes / (int)sizeof(int);
+    if (N <= 0) { 
+        std::fprintf(stderr, "baseline: N=%d too small\n", N); 
+        std::exit(1); 
+    }
 
-void Patterns::device_kernels(int bytes, int iterations, int* base_array){
-    int* d = nullptr;
-    Backend* DuT = new Backend();
-    DuT->dev_malloc();
-    DuT->dev_memcpy();
-//      HIP_CHECK(hipMalloc(&d, N * sizeof(int)));
- //     HIP_CHECK(hipMemcpy(d, h, N * sizeof(int), hipMemcpyHostToDevice));
-      const int threads_per_block = 256;
-      const int blocks = (bytes + threads_per_block - 1) / threads_per_block;
-      for (int it = 0; it < iterations; it++) {
-       DuT->dev_addone();
-       DuT->dev_sync();
-       DuT->dev_memcpy();
-       DuT->dev_free();
-       //   HIP_CHECK(hipDeviceSynchronize());
+    int* work = (int*)std::malloc((std::size_t)N * sizeof(int));
+    if (!work) { 
+        std::fprintf(stderr, "baseline: malloc failed\n"); 
+        std::exit(1); 
+    }
 
-      //HIP_CHECK(hipMemcpy(h, d, N * sizeof(int), hipMemcpyDeviceToHost));
-      //HIP_CHECK(hipFree(d));
-      std::printf("kernels finished. Configuration: bytes : %d, iterations: %d, Output is: %d. \n", bytes, iterations, h[0]);  
-      assert(base_array[0] == iterations);
+    std::memcpy(work, base_array, (std::size_t)N * sizeof(int));
 
+    for (int it = 0; it < iterations; ++it) {
+        for (int i = 0; i < N; ++i) work[i] += 1;
+    }
+
+    assert(work[0] == iterations);
+    std::free(work);
 }
 
+void Patterns::device_kernels(Backend& b, int bytes, int iterations, int* base_array) {
+    
+    const int N = bytes / (int)sizeof(int);
+    if (N <= 0) { 
+        std::fprintf(stderr, "kernels: N=%d too small\n", N); 
+        std::exit(1); 
+    }
 
+    int* host = (int*)std::malloc((std::size_t)N * sizeof(int));
+    if (!host) { 
+        std::fprintf(stderr, "kernels: malloc host failed\n"); 
+        std::exit(1); 
+    }
+    std::memcpy(host, base_array, (std::size_t)N * sizeof(int));
 
+    void* d = b.dev_malloc((std::size_t)bytes);
+    if (!d) { 
+        std::fprintf(stderr, "kernels: dev_malloc returned null\n"); 
+        std::exit(1); 
+    }
+
+    b.h2d(d, host, (std::size_t)bytes);
+
+    for (int it = 0; it < iterations; ++it) {
+        b.add_one(d, N);
+        b.sync();
+    }
+
+    b.d2h(host, d, (std::size_t)bytes);
+    b.dev_free(d);
+
+    assert(host[0] == iterations);
+
+    std::printf("kernels finished. backend=%s bytes=%d iterations=%d output=%d\n", b.name(), bytes, iterations, host[0]);
+
+    std::free(host);
+}
 
 

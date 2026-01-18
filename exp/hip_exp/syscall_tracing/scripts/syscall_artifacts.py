@@ -2,30 +2,26 @@
 """
 syscall_artifacts.py
 
-Generate "scientific" artifacts from syscall sweep stats.
+Generate artifacts (tables + plots) from syscall sweep stats.
 
-Input CSV must contain at least:
-  variant,bytes,iterations,key,calls,seconds
+This script accepts aggregate CSVs produced by your pipeline. It supports two input schemas:
 
-You can request any metric columns that already exist in the CSV via --metrics,
-e.g. usec_per_iter, calls_per_iter, usec_per_byte, calls_per_byte, pct_time_sum, ...
+A) Raw-ish schema:
+   backend,variant,bytes,iterations,key,calls,seconds,...
 
-Core idea:
-  - choose an axis to sweep: bytes OR iterations OR variant
-  - fix the other two axes (recommended) using --fixed-bytes/--fixed-iterations/--fixed-variant
-  - produce:
-      * filtered CSV
-      * trend table (long form): metric, axis_value, key, value
-      * wide pivot table(s): axis rows x key columns, one file per metric
-      * top-k table per axis_value (for each metric)
-      * plots per metric: line plot and/or heatmap (PDF/PNG)
+B) Mean-over-repeats schema (your current aggregate outputs):
+   backend,variant,bytes,iterations,key,calls_mean,seconds_mean,...
+
+Internally we normalize to canonical columns:
+  calls, seconds
+
+Outputs go to:
+  <outdir>/axis_<axis>/...
 
 Example:
-  python syscall_artifacts.py -i category.csv \
-      --axis iterations --fixed-bytes 10000000 --fixed-variant kernels \
-      --metrics usec_per_iter calls_per_iter \
-      --topk 10 --outdir out --fmt pdf --dpi 300 \
-      --plots line heatmap --tables filtered trend wide topk
+  python syscall_artifacts.py -i results/artifacts/statistics/aggregate_syscall.csv \
+      --axis bytes --fixed-backend tb_cpu --fixed-variant kernels --fixed-iterations 5000 \
+      --metrics usec_per_iter calls_per_iter --topk 10 --fmt pdf
 """
 
 from __future__ import annotations
@@ -40,23 +36,24 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 
-AXIS_CHOICES = ["bytes", "iterations", "variant"]
+AXIS_CHOICES = ["bytes", "iterations", "variant", "backend"]
 PLOT_CHOICES = ["line", "heatmap"]
 TABLE_CHOICES = ["filtered", "trend", "wide", "topk"]
 
-
-REQUIRED_BASE_COLS = ["variant", "bytes", "iterations", "key", "calls", "seconds"]
+# We normalize calls/seconds inside load_inputs(), so don't hard-require those exact names here.
+REQUIRED_BASE_COLS = ["backend", "variant", "bytes", "iterations", "key"]
 
 
 @dataclass
 class Config:
     inputs: List[str]
     axis: str
+    fixed_backend: Optional[str]
     fixed_variant: Optional[str]
     fixed_bytes: Optional[int]
     fixed_iterations: Optional[int]
     metrics: List[str]
-    outdir: str
+    outdir: str  # root dir; actual outputs go under outdir/axis_<axis>/
     topk: int
     include_keys: Optional[List[str]]
     exclude_keys: Optional[List[str]]
@@ -74,6 +71,8 @@ def parse_args() -> Config:
     p.add_argument("-i", "--input", action="append", required=True, help="CSV path (repeatable).")
 
     p.add_argument("--axis", choices=AXIS_CHOICES, required=True, help="Swept axis.")
+
+    p.add_argument("--fixed-backend", default=None, help="Fix backend unless axis=backend.")
     p.add_argument("--fixed-variant", default=None, help="Fix variant unless axis=variant.")
     p.add_argument("--fixed-bytes", type=int, default=None, help="Fix bytes unless axis=bytes.")
     p.add_argument("--fixed-iterations", type=int, default=None, help="Fix iterations unless axis=iterations.")
@@ -82,26 +81,26 @@ def parse_args() -> Config:
         "--metrics",
         nargs="+",
         required=True,
-        help="Metric column names to analyze (must exist in CSV). "
-             "E.g. usec_per_iter calls_per_iter usec_per_byte calls_per_byte",
+        help="Metric column names to analyze (must exist in CSV).",
     )
 
-    p.add_argument("--topk", type=int, default=15,
-                   help="Keep top-k keys by total magnitude across chosen metrics. 0 = keep all keys.")
+    p.add_argument(
+        "--topk",
+        type=int,
+        default=15,
+        help="Keep top-k keys by total magnitude across chosen metrics. 0 = keep all keys.",
+    )
 
     p.add_argument("--include-keys", nargs="*", default=None, help="Only include these keys.")
     p.add_argument("--exclude-keys", nargs="*", default=None, help="Exclude these keys.")
-    p.add_argument("--drop-zero-metrics", action="store_true",
-                   help="Drop rows where all selected metrics are 0.")
+    p.add_argument("--drop-zero-metrics", action="store_true", help="Drop rows where all selected metrics are 0.")
 
-    p.add_argument("--outdir", "-o", default="artifacts_out", help="Output directory.")
+    p.add_argument("--outdir", "-o", default="results/artifacts", help="Root artifacts output directory.")
     p.add_argument("--fmt", choices=["pdf", "png"], default="pdf", help="Plot output format.")
     p.add_argument("--dpi", type=int, default=300, help="Plot DPI (for png; harmless for pdf).")
 
-    p.add_argument("--plots", nargs="*", choices=PLOT_CHOICES, default=["line", "heatmap"],
-                   help="Which plots to generate.")
-    p.add_argument("--tables", nargs="*", choices=TABLE_CHOICES, default=["filtered", "trend", "wide", "topk"],
-                   help="Which tables to generate.")
+    p.add_argument("--plots", nargs="*", choices=PLOT_CHOICES, default=["line", "heatmap"])
+    p.add_argument("--tables", nargs="*", choices=TABLE_CHOICES, default=["filtered", "trend", "wide", "topk"])
 
     p.add_argument("--logy", action="store_true", help="Log-scale y-axis for line plots.")
     p.add_argument("--legend-cols", type=int, default=2, help="Legend columns for line plots.")
@@ -110,6 +109,7 @@ def parse_args() -> Config:
     return Config(
         inputs=args.input,
         axis=args.axis,
+        fixed_backend=args.fixed_backend,
         fixed_variant=args.fixed_variant,
         fixed_bytes=args.fixed_bytes,
         fixed_iterations=args.fixed_iterations,
@@ -132,8 +132,11 @@ def ensure_outdir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
+def axis_outdir(root: str, axis: str) -> str:
+    return os.path.join(root, f"axis_{axis}")
+
+
 def set_scientific_matplotlib_defaults() -> None:
-    # Reasonable "latexable" defaults without assuming LaTeX is installed.
     plt.rcParams.update({
         "figure.figsize": (7.0, 4.2),
         "figure.dpi": 120,
@@ -151,24 +154,52 @@ def set_scientific_matplotlib_defaults() -> None:
     })
 
 
+def _normalize_calls_seconds(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normalize to canonical columns: calls, seconds.
+    Accepts either:
+      calls + seconds
+    or
+      calls_mean + seconds_mean
+
+    Does NOT drop the original columns; just ensures calls/seconds exist.
+    """
+    if "calls" not in df.columns:
+        if "calls_mean" in df.columns:
+            df["calls"] = df["calls_mean"]
+        else:
+            raise ValueError("Missing calls column. Expected 'calls' or 'calls_mean'.")
+
+    if "seconds" not in df.columns:
+        if "seconds_mean" in df.columns:
+            df["seconds"] = df["seconds_mean"]
+        else:
+            raise ValueError("Missing seconds column. Expected 'seconds' or 'seconds_mean'.")
+
+    # Coerce numeric
+    df["calls"] = pd.to_numeric(df["calls"], errors="coerce")
+    df["seconds"] = pd.to_numeric(df["seconds"], errors="coerce")
+    return df
+
+
 def load_inputs(paths: List[str]) -> pd.DataFrame:
-    dfs = []
-    for pth in paths:
-        df = pd.read_csv(pth)
-        dfs.append(df)
+    dfs = [pd.read_csv(p) for p in paths]
     df = pd.concat(dfs, ignore_index=True)
 
     missing = [c for c in REQUIRED_BASE_COLS if c not in df.columns]
     if missing:
         raise ValueError(f"Missing required base columns: {missing}\nFound: {list(df.columns)}")
 
+    # Normalize calls/seconds to canonical names (works with *_mean schema)
+    df = _normalize_calls_seconds(df)
+
+    df["backend"] = df["backend"].astype(str)
     df["variant"] = df["variant"].astype(str)
     df["key"] = df["key"].astype(str)
 
     for c in ["bytes", "iterations", "calls", "seconds"]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    # Coerce requested metrics to numeric if they exist
     return df
 
 
@@ -178,13 +209,15 @@ def validate_metrics_exist(df: pd.DataFrame, metrics: Sequence[str]) -> None:
         raise ValueError(
             "These requested metrics are not present in the CSV:\n"
             f"  {missing}\n"
-            "Fix: either compute them upstream (as you said you do) or remove them from --metrics."
+            "Fix: compute them upstream or remove them from --metrics."
         )
 
 
 def apply_filters(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     out = df.copy()
 
+    if cfg.axis != "backend" and cfg.fixed_backend is not None:
+        out = out[out["backend"] == cfg.fixed_backend]
     if cfg.axis != "variant" and cfg.fixed_variant is not None:
         out = out[out["variant"] == cfg.fixed_variant]
     if cfg.axis != "bytes" and cfg.fixed_bytes is not None:
@@ -197,11 +230,9 @@ def apply_filters(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     if cfg.exclude_keys:
         out = out[~out["key"].isin(cfg.exclude_keys)]
 
-    # Keep only rows with axis + metrics available
     keep = [cfg.axis, "key"] + list(cfg.metrics)
     out = out.dropna(subset=keep, how="any")
 
-    # Numeric conversion for requested metrics
     for m in cfg.metrics:
         out[m] = pd.to_numeric(out[m], errors="coerce")
     out = out.dropna(subset=list(cfg.metrics))
@@ -220,8 +251,7 @@ def maybe_topk(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
 
     key_scores = tmp.groupby("key", as_index=True)["_score"].sum().sort_values(ascending=False)
     keep = set(key_scores.head(cfg.topk).index.tolist())
-    tmp = tmp[tmp["key"].isin(keep)].drop(columns=["_score"])
-    return tmp
+    return tmp[tmp["key"].isin(keep)].drop(columns=["_score"])
 
 
 def drop_zero_rows(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
@@ -237,6 +267,8 @@ def build_base_filename(cfg: Config) -> str:
     metric_part = "+".join(cfg.metrics)
     parts = [f"axis={cfg.axis}", f"metric={metric_part}"]
 
+    if cfg.axis != "backend" and cfg.fixed_backend is not None:
+        parts.append(f"backend={cfg.fixed_backend}")
     if cfg.axis != "variant" and cfg.fixed_variant is not None:
         parts.append(f"variant={cfg.fixed_variant}")
     if cfg.axis != "bytes" and cfg.fixed_bytes is not None:
@@ -288,19 +320,15 @@ def make_topk_table(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
             sub_agg = sub.groupby("key", as_index=False)[m].mean().sort_values(m, ascending=False)
             top = sub_agg.head(cfg.topk if cfg.topk > 0 else min(25, len(sub_agg)))
             for _, r in top.iterrows():
-                rows.append({
-                    "metric": m,
-                    cfg.axis: xval,
-                    "key": r["key"],
-                    "value": r[m],
-                })
+                rows.append({"metric": m, cfg.axis: xval, "key": r["key"], "value": r[m]})
     out = pd.DataFrame(rows)
-    # Sorting for readability
+
     if cfg.axis in ("bytes", "iterations"):
         out["_axis_num"] = pd.to_numeric(out[cfg.axis], errors="coerce")
         out = out.sort_values(["metric", "_axis_num", "value"], ascending=[True, True, False]).drop(columns=["_axis_num"])
     else:
         out = out.sort_values(["metric", cfg.axis, "value"], ascending=[True, True, False])
+
     return out
 
 
@@ -309,18 +337,19 @@ def axis_label(axis: str) -> str:
         return "Bytes"
     if axis == "iterations":
         return "Iterations"
-    return "Execution model (variant)"
+    if axis == "variant":
+        return "Execution model (variant)"
+    return "Backend"
 
 
 def metric_label(m: str) -> str:
-    # Keep labels clean + LaTeX-friendly-ish
     repl = {
         "usec_per_iter": "Syscall time per iteration (µs/iter)",
         "calls_per_iter": "Syscall calls per iteration (calls/iter)",
         "usec_per_byte": "Syscall time per byte (µs/byte)",
         "calls_per_byte": "Syscall calls per byte (calls/byte)",
-        "usec_per_mb": "Syscall time per MB (µs/MB)",
-        "pct_time_sum": "Share of syscall time (pct_time_sum)",
+        "pct_time_mean": "Share of syscall time (% mean)",
+        "pct_time_sum": "Share of syscall time (% sum)",
     }
     return repl.get(m, m)
 
@@ -329,7 +358,6 @@ def plot_line(pivot: pd.DataFrame, cfg: Config, metric: str, outpath: str) -> No
     plt.figure()
 
     x = pivot.index.to_numpy()
-    # If numeric axis, keep it numeric for proper scaling. Otherwise plot as categorical.
     is_numeric_axis = cfg.axis in ("bytes", "iterations")
 
     for col in pivot.columns:
@@ -339,20 +367,16 @@ def plot_line(pivot: pd.DataFrame, cfg: Config, metric: str, outpath: str) -> No
         else:
             plt.plot(range(len(x)), y, marker="o", linewidth=1.2, label=str(col))
 
-    if is_numeric_axis:
-        plt.xlabel(axis_label(cfg.axis))
-    else:
-        plt.xlabel(axis_label(cfg.axis))
+    plt.xlabel(axis_label(cfg.axis))
+    if not is_numeric_axis:
         plt.xticks(range(len(x)), [str(v) for v in x], rotation=25, ha="right")
 
     plt.ylabel(metric_label(metric))
-    title = f"{metric} vs {cfg.axis}"
-    plt.title(title)
+    plt.title(f"{metric} vs {cfg.axis}")
 
     if cfg.logy:
         plt.yscale("log")
 
-    # Legend outside-ish
     plt.legend(ncol=cfg.legend_cols, frameon=True)
     plt.tight_layout()
     plt.savefig(outpath, dpi=cfg.dpi)
@@ -364,7 +388,6 @@ def plot_heatmap(pivot: pd.DataFrame, cfg: Config, metric: str, outpath: str) ->
     x_labels = [str(c) for c in pivot.columns]
     y_labels = [str(i) for i in pivot.index]
 
-    # Size scales with table dimensions
     w = max(7, 0.35 * len(x_labels))
     h = max(4, 0.30 * len(y_labels))
     plt.figure(figsize=(w, h))
@@ -386,6 +409,8 @@ def plot_heatmap(pivot: pd.DataFrame, cfg: Config, metric: str, outpath: str) ->
 
 def warn_if_not_fixed(cfg: Config) -> None:
     missing = []
+    if cfg.axis != "backend" and cfg.fixed_backend is None:
+        missing.append("--fixed-backend")
     if cfg.axis != "variant" and cfg.fixed_variant is None:
         missing.append("--fixed-variant")
     if cfg.axis != "bytes" and cfg.fixed_bytes is None:
@@ -398,7 +423,10 @@ def warn_if_not_fixed(cfg: Config) -> None:
 
 def main() -> None:
     cfg = parse_args()
-    ensure_outdir(cfg.outdir)
+
+    outdir = axis_outdir(cfg.outdir, cfg.axis)
+    ensure_outdir(outdir)
+
     set_scientific_matplotlib_defaults()
     warn_if_not_fixed(cfg)
 
@@ -416,38 +444,39 @@ def main() -> None:
 
     base = build_base_filename(cfg)
 
-    # ---------- TABLES ----------
+    # TABLES
     if "filtered" in cfg.tables:
-        keep_cols = REQUIRED_BASE_COLS + cfg.metrics
+        # Include canonical calls/seconds; also keep *_mean if present for traceability.
+        keep_cols = REQUIRED_BASE_COLS + ["calls", "seconds"] + cfg.metrics
         keep_cols = [c for c in keep_cols if c in df.columns]
-        df[keep_cols].to_csv(os.path.join(cfg.outdir, f"{base}__filtered.csv"), index=False)
+        df[keep_cols].to_csv(os.path.join(outdir, f"{base}__filtered.csv"), index=False)
 
     if "trend" in cfg.tables:
         trend = make_trend_table(df, cfg)
-        trend.to_csv(os.path.join(cfg.outdir, f"{base}__trend_long.csv"), index=False)
+        trend.to_csv(os.path.join(outdir, f"{base}__trend_long.csv"), index=False)
 
     if "wide" in cfg.tables:
         for m in cfg.metrics:
             pivot = make_wide_pivot(df, cfg, m)
-            pivot.to_csv(os.path.join(cfg.outdir, f"{base}__wide__{m}.csv"))
+            pivot.to_csv(os.path.join(outdir, f"{base}__wide__{m}.csv"))
 
     if "topk" in cfg.tables:
         topk = make_topk_table(df, cfg)
-        topk.to_csv(os.path.join(cfg.outdir, f"{base}__topk_by_{cfg.axis}.csv"), index=False)
+        topk.to_csv(os.path.join(outdir, f"{base}__topk_by_{cfg.axis}.csv"), index=False)
 
-    # ---------- PLOTS ----------
+    # PLOTS
     for m in cfg.metrics:
         pivot = make_wide_pivot(df, cfg, m)
 
         if "line" in cfg.plots:
-            outpath = os.path.join(cfg.outdir, f"{base}__line__{m}.{cfg.fmt}")
+            outpath = os.path.join(outdir, f"{base}__line__{m}.{cfg.fmt}")
             plot_line(pivot, cfg, m, outpath)
 
         if "heatmap" in cfg.plots:
-            outpath = os.path.join(cfg.outdir, f"{base}__heatmap__{m}.{cfg.fmt}")
+            outpath = os.path.join(outdir, f"{base}__heatmap__{m}.{cfg.fmt}")
             plot_heatmap(pivot, cfg, m, outpath)
 
-    print(f"Done. Output prefix:\n  {os.path.join(cfg.outdir, base)}")
+    print(f"Done. Output prefix:\n  {os.path.join(outdir, base)}")
 
 
 if __name__ == "__main__":

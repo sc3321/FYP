@@ -1,9 +1,0 @@
-Pretty tool-chain intensive day. Installing HIP-CPU libraries on linux VM.
-
-Sorted out include paths and learned about where global includes are held.
-
-Made cross platform compatible code.
-
-Learned about 2> for compiler error outputs.
-
-Started first use of the -strace to see system call traces for a simple return 0 program. 

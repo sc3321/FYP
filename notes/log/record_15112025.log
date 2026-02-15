@@ -1,3 +1,0 @@
-- Understanding of system-calls and how they work in the UNIX ecosystem.
-
--Understanding of how to benchmark a system-call to isolate the cost of overhead of entering into and out of the USER state.

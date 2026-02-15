@@ -1,4 +1,0 @@
-- Completion of the syscallsbm.c file.
-- Completed the command line arguement integration and makefile.
-- Running first few tests to see how syscall times.
-- Initial results look quite noisy.

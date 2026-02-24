@@ -1,0 +1,5 @@
+19:23:25.527423 rseq(0x765807ffffe0, 0x20, 0, 0x53053053) = 0 <0.000018>
+19:23:25.527481 set_robust_list(0x765807fff9a0, 24) = 0 <0.000021>
+19:23:25.527531 rt_sigprocmask(SIG_SETMASK, [], NULL, 8) = 0 <0.000503>
+19:23:25.557786 futex(0x3bdcb584, FUTEX_WAIT_PRIVATE, 288, NULL) = ?
+19:23:27.926959 +++ exited with 0 +++

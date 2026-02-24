@@ -1,0 +1,3 @@
+raw/: large binary/raw logs (perf.data, perf_sched.data, strace.*)
+sums/: human-readable summaries (strace -c, perf report, sched timehist)
+config.json: reproduction + parameters + env + host + git

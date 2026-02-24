@@ -1,0 +1,15 @@
+19:21:57.478185 rseq(0x7c44ec126fe0, 0x20, 0, 0x53053053) = 0 <0.000038>
+19:21:57.478320 set_robust_list(0x7c44ec1269a0, 24) = 0 <0.000034>
+19:21:57.478436 rt_sigprocmask(SIG_SETMASK, [], NULL, 8) = 0 <0.000033>
+19:21:57.478544 gettid()                = 1201341 <0.000030>
+19:21:57.478648 futex(0x326e7ef8, FUTEX_WAKE_PRIVATE, 2147483647) = 1 <0.000049>
+19:21:57.478767 mmap(NULL, 134217728, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7c44e3800000 <0.000093>
+19:21:57.478922 munmap(0x7c44e3800000, 8388608) = 0 <0.000069>
+19:21:57.479060 munmap(0x7c44e8000000, 58720256) = 0 <0.000044>
+19:21:57.479160 mprotect(0x7c44e4000000, 135168, PROT_READ|PROT_WRITE) = 0 <0.000037>
+19:21:57.479305 poll([{fd=3, events=POLLIN}], 1, -1) = 1 ([{fd=3, revents=POLLIN}]) <0.000029>
+19:21:57.479419 read(3, "\1\0\0\0\0\0\0\0", 8) = 8 <0.000028>
+19:21:57.479525 poll([{fd=3, events=POLLIN}, {fd=4, events=POLLIN}], 2, -1) = 1 ([{fd=3, revents=POLLIN}]) <0.053502>
+19:21:57.533125 read(3, "\1\0\0\0\0\0\0\0", 8) = 8 <0.000039>
+19:21:57.533233 poll([{fd=3, events=POLLIN}, {fd=4, events=POLLIN}, {fd=13, events=POLLIN}], 3, -1 <unfinished ...>) = ?
+19:22:03.024497 +++ exited with 0 +++

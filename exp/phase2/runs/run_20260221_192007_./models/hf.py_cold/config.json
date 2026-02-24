@@ -1,0 +1,23 @@
+{
+  "cmd": [
+    "python",
+    "./models/hf.py"
+  ],
+  "env": {},
+  "git": {
+    "commit": "067a2ac2135a10c9a56d6042b55ed2828a50742f",
+    "dirty": true,
+    "repo_dir": "."
+  },
+  "host": {
+    "hostname": "gpu19.doc.ic.ac.uk",
+    "nvidia_smi": "NVIDIA GeForce RTX 2080 Ti, 580.65.06",
+    "platform": "Linux-6.14.0-29-generic-x86_64-with-glibc2.39",
+    "python": "3.12.12",
+    "uname": "Linux gpu19.doc.ic.ac.uk 6.14.0-29-generic #29~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Thu Aug 14 16:52:50 UTC 2 x86_64 x86_64"
+  },
+  "params": {},
+  "tag": "cold",
+  "timestamp_iso": "2026-02-21T19:20:08.900867",
+  "workload": "./models/hf.py"
+}

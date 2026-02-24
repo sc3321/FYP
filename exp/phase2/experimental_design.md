@@ -11,21 +11,22 @@ Pertubation space for my experiments.
 #### Submission Topology:
 
 The how and when of work being handed to the GPU by the CPU.
-Mechanically, this includes:
-    1. Kernel launches calls (cudaLaunchKernel).
-    2. Batched submission or separated submission.
-    3. Fused kernels?
-    4. How many launches.
-    5. Multiple streams?
+
+Mechanically, this includes:<br>
+    1. Kernel launches calls (cudaLaunchKernel).<br>
+    2. Batched submission or separated submission.<br>
+    3. Fused kernels?<br>
+    4. How many launches.<br>
+    5. Multiple streams?<br>
 
 Answers how many times the host requests work to be enqueued to the device.
 
 Each launch involves some runtime bookkeeping, driver calls, queue submission etc. This is all valuable OS level interpretation signals.
 
 Possible perturbations:
-    1. varying kernel sizes.
-    2. 100 small kernels vs 1 large kernel.
-    3. fused kernel implementation?
+    1. varying kernel sizes.<br>
+    2. 100 small kernels vs 1 large kernel.<br>
+    3. fused kernel implementation?<br>
 
 This lever helps isolate the overhead due to the dispatch of work.
 
@@ -33,21 +34,21 @@ This lever helps isolate the overhead due to the dispatch of work.
 
 The how and when of CPU waiting for GPU.
 
-Mechanically this includes:
-    1. cudStreamSynchronise()
-    2. cudaDeviceSynchronise()
-    3. cudaMemcpy()
-    4. Program exits.
+Mechanically this includes:<br>
+    1. cudStreamSynchronise()<br>
+    2. cudaDeviceSynchronise()<br>
+    3. cudaMemcpy()<br>
+    4. Program exits.<br>
 
 This answers when does the host block waiting for the device to complete work. 
 
 Waiting is implemented via futex(), epoll, poll, thread sleeps etc. which are all valuable OS visible mechanisms.
 
-Possible perturbations:
-    1. Syncing once at the end of the work.
-    2. Syncing every iteration of work.
-    3. No syncing.
-    4. Asynchronous memcpy.
+Possible perturbations:<br>
+    1. Syncing once at the end of the work.<br>
+    2. Syncing every iteration of work.<br>
+    3. No syncing.<br>
+    4. Asynchronous memcpy.<br>
 
 This lever helps isolate the dynamics of completion behaviour.
 
@@ -55,21 +56,21 @@ This lever helps isolate the dynamics of completion behaviour.
 
 The how and when of allocating and freeing device memory.
 
-Mechanically it includes:
-    1. cudaMalloc()
-    2. cudaFree()
-    3. Host pinned memory.
-    4. unified memory.
-    5. Reuse vs Per-Iteration allocation.
+Mechanically it includes:<br>
+    1. cudaMalloc()<br>
+    2. cudaFree()<br>
+    3. Host pinned memory.<br>
+    4. unified memory.<br>
+    5. Reuse vs Per-Iteration allocation.<br>
 
 This answers when and how the device memory is managed throughout execution.
 Memory management on device involved mmap, mprotect, pinned pages, ioctl calls etc. which are all valuable OS visible signals to explore. 
 
-Possible Pertubations:
-    1. Reuse buffers.
-    2. Allocate once outside loop.
-    3. Many small allocations and frees inside loop.
-    4. Changing allocation size.
+Possible Pertubations:<br>
+    1. Reuse buffers.<br>
+    2. Allocate once outside loop.<br>
+    3. Many small allocations and frees inside loop.<br>
+    4. Changing allocation size.<br>
 
 This lever isolates the overhead due to memory management.
  
@@ -77,19 +78,19 @@ This lever isolates the overhead due to memory management.
 
 This is the creation and initialisation of the CUDA runtime.
 
-Mechanically this means:
-    1. First cuda call triggering context creation.
-    2. Multiple processes creating contexts.
-    3. Warmup?
+Mechanically this means:<br>
+    1. First cuda call triggering context creation.<br>
+    2. Multiple processes creating contexts.<br>
+    3. Warmup?<br>
 
 When does the runtime setup the device state and memory addresses.
 Involves large memory mapping, driver initialiation, thread creation etc. which are useful for OS level interpretation.
 
 Possible Pertubations:
-    1. Single vs multiple runs.
-    2. Multiple processes?
-    3. Warmup vs later launches?
-    4. Early initialiation.
+    1. Single vs multiple runs.<br>
+    2. Multiple processes?<br>
+    3. Warmup vs later launches?<br>
+    4. Early initialiation.<br>
 
 This lever isolates initialisation overheads.
 

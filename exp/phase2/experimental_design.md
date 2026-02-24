@@ -23,7 +23,7 @@ Answers how many times the host requests work to be enqueued to the device.
 
 Each launch involves some runtime bookkeeping, driver calls, queue submission etc. This is all valuable OS level interpretation signals.
 
-Possible perturbations:
+Possible perturbations:<br>
     1. varying kernel sizes.<br>
     2. 100 small kernels vs 1 large kernel.<br>
     3. fused kernel implementation?<br>
@@ -86,7 +86,7 @@ Mechanically this means:<br>
 When does the runtime setup the device state and memory addresses.
 Involves large memory mapping, driver initialiation, thread creation etc. which are useful for OS level interpretation.
 
-Possible Pertubations:
+Possible Pertubations:<br>
     1. Single vs multiple runs.<br>
     2. Multiple processes?<br>
     3. Warmup vs later launches?<br>

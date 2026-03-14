@@ -41,6 +41,7 @@ int main(){
     }
 
     int threadsPerBlock = 64;
+    k
     int blocks = (GLOBSIZE + threadsPerBlock -1) / threadsPerBlock;
     
     float *d_A, *d_B, *d_C, *d_D;

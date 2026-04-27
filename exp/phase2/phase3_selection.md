@@ -217,23 +217,25 @@ This makes the Phase 3 prototype more than instrumentation: it becomes a small m
 
 ## 3. vLLM validation plan
 
-### Mechanism family 1
-- Microbenchmark source:
-- Actual mechanism isolated:
-- Plausible vLLM analogue:
-- What would count as supportive evidence:
-- What would count as ambiguous evidence:
-- What would count as weakening evidence:
-- Scenarios to try:
+### Mechanism family 1: Submission / dispatch fragmentation
 
-### Mechanism family 2
-- Microbenchmark source:
-- Actual mechanism isolated:
-- Plausible vLLM analogue:
-- What would count as supportive evidence:
-- What would count as ambiguous evidence:
-- What would count as weakening evidence:
-- Scenarios to try:
+- **Microbenchmark source:** Submission topology variation.
+- **Actual mechanism isolated:** Increasing the number of small GPU submissions amplifies host-side launch/driver activity, even when each individual launch is cheap.
+- **Plausible vLLM analogue:** Many short requests with short prompts and short outputs, especially decode-heavy serving where work is repeatedly advanced in small steps.
+- **What would count as supportive evidence:** Dense, repeated `ioctl`-dominated bursts or many small syscall clusters during request processing, with activity increasing under many short requests compared with fewer longer requests.
+- **What would count as ambiguous evidence:** Increased syscall activity exists, but is dominated by networking, Python/event-loop behaviour, or unrelated `epoll_wait` rather than GPU-driver interaction.
+- **What would count as weakening evidence:** Short-request workloads do not produce denser submission/driver activity than the long-request or baseline case; activity appears flat, sparse, or unrelated to request structure.
+- **Scenarios to try:** Many sequential short-prompt, short-output requests; optionally repeat with concurrent short requests if sequential runs are too sparse.
+
+### Mechanism family 2: Completion / scheduler pressure
+
+- **Microbenchmark source:** Scheduler pressure / GEMM fragmentation / CPU contention.
+- **Actual mechanism isolated:** Compute-heavier fragmented GPU work increases host-visible completion management, including `poll`, `futex`, helper-thread activity, and scheduler sensitivity under CPU contention.
+- **Plausible vLLM analogue:** Long-prompt prefill and/or longer generation requests, especially under concurrent load or same-core CPU contention.
+- **What would count as supportive evidence:** Longer or more frequent `poll`/`futex` intervals, increased helper-thread wait/wake activity, or stretched completion-related clusters compared with the uncontended baseline.
+- **What would count as ambiguous evidence:** Waiting increases, but only in server/network/event-loop threads and cannot be plausibly connected to GPU completion or driver/helper-thread behaviour.
+- **What would count as weakening evidence:** Long prompts, concurrency, or CPU contention do not change completion/waiting behaviour relative to short prompts or uncontended runs.
+- **Scenarios to try:** Sequential long-prompt requests as a baseline, then concurrent long requests or mixed long+short requests, then repeat one case under CPU-core contention.
 
 ---
 

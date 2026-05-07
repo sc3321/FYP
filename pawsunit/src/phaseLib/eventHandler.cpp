@@ -1,5 +1,20 @@
 #include "../../include/eventHandler.h"
 #include <cstdio>
+#include <cstring>
+
+const char* workloadClasstoString(workload_Class wc){
+    switch (wc){
+        case workload_Class::BE:
+            return "BE";
+        case workload_Class::LC:
+            return "LC";
+        case workload_Class::UNK:
+            return "UNK";
+        default:
+            return "INVALID";
+    }
+
+} 
 
 void eventHandler::writeEvent(gpuPhase& phase){
     char *fileName = (char*)std::malloc(16 * sizeof(char));
@@ -19,21 +34,21 @@ void eventHandler::writeEvent(gpuPhase& phase){
     char *phaseId = (char*)std::malloc(128 * sizeof(char));
 
     snprintf(threadId, 64, "%d", (int)phase.phaseMetadata.tid);
-    *workloadClass = (char)phase.workloadClass;
-    *semanticInfo = *phase.semanticIdentifier;
+    strcpy(workloadClass, workloadClasstoString(phase.workloadClass));
+    strcpy(semanticInfo, phase.semanticIdentifier.c_str());
     snprintf(phaseId, 128, "%ld, %d", (long)phase.phaseMetadata.phaseId.first, phase.phaseMetadata.phaseId.second);
 
-	snprintf(phaseData, sizeof(phaseData), "%s: %s, %c, %c\n", 
+	snprintf(phaseData, sizeof(phaseData), "%s: %s, %s, %s\n", 
          threadId, 
          phaseId, 
-         *phase.semanticIdentifier, 
-         (char)phase.workloadClass);	
+         phase.semanticIdentifier.c_str(), 
+         workloadClass);	
 	
 	fputs(phaseData, fptr);
     fclose(fptr);
 
     free(threadId);
     free(phaseId);
-    free(workloadClass);
+    free((char*)workloadClass);
     free(semanticInfo);
 }

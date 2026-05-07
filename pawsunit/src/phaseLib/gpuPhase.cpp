@@ -12,7 +12,8 @@
 using phase_id_t = uint64_t;
 static std::atomic<uint64_t> nextPhaseId{1};
 
-workload_Class getPriority(char* priority){
+workload_Class getPriority(const char* inputPriority){
+    char* priority = strcpy(priority, inputPriority);
     for(int i = 0; i < strlen(priority); ++i){
         priority[i] = toupper(priority[i]);
     }
@@ -26,8 +27,8 @@ workload_Class getPriority(char* priority){
     }
 };
 
-gpuPhase::gpuPhase(char* semanticIdentifier, char* priority){
-    semanticIdentifier = semanticIdentifier;
+gpuPhase::gpuPhase(const char* inputSemanticIdentifier,const char* priority){
+    semanticIdentifier = inputSemanticIdentifier;
     phaseMetadata.pid = getpid();
     phaseMetadata.tid = gettid();
     clock_gettime(CLOCK_MONOTONIC_COARSE, &phaseMetadata.timeNow); 
@@ -49,7 +50,7 @@ void phaseManager::updatePhaseTable(const gpuPhase& newPhase){
    }
 }
 
-void phaseManager::phaseBegin(char* semanticIdentifier, char* priority){
+void phaseManager::phaseBegin(const char* semanticIdentifier, char* priority){
     activePhases.curPhases.emplace(semanticIdentifier, priority);
     gpuPhase& ref = activePhases.curPhases.top();
     setPhaseId(ref);

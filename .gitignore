@@ -2,4 +2,4 @@ build/
 **/runs/
 **/trace.*
 **/*.txt
-*/out/
+**/out/

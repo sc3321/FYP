@@ -1,0 +1,38 @@
+1778754067.918977 mmap(NULL, 134217728, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x772044c00000 <0.000012>
+1778754067.919023 munmap(0x772044c00000, 54525952) = 0 <0.000013>
+1778754067.919055 munmap(0x77204c000000, 12582912) = 0 <0.000011>
+1778754067.919084 mprotect(0x772048000000, 135168, PROT_READ|PROT_WRITE) = 0 <0.000011>
+1778754067.919121 poll([{fd=15, events=POLLIN}], 1, 100) = 1 ([{fd=15, revents=POLLIN}]) <0.040461>
+1778754067.959645 futex(0x7ffdf5a27510, FUTEX_WAKE_PRIVATE, 1) = 1 <0.000018>
+1778754067.959702 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}], 2, 60) = 1 ([{fd=15, revents=POLLIN}]) <0.009145>
+1778754067.968913 futex(0x7ffdf5a27510, FUTEX_WAKE_PRIVATE, 1) = 1 <0.000017>
+1778754067.968966 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}], 3, 51) = 1 ([{fd=15, revents=POLLIN}]) <0.009244>
+1778754067.978271 futex(0x7ffdf5a27510, FUTEX_WAKE_PRIVATE, 1) = 1 <0.000017>
+1778754067.978314 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}], 4, 41) = 1 ([{fd=15, revents=POLLIN}]) <0.000762>
+1778754067.979130 futex(0x7ffdf5a27600, FUTEX_WAKE_PRIVATE, 1) = 1 <0.000012>
+1778754067.979160 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}], 5, 40) = 1 ([{fd=15, revents=POLLIN}]) <0.021786>
+1778754068.000999 futex(0x7ffdf5a27680, FUTEX_WAKE_PRIVATE, 1) = 1 <0.000014>
+1778754068.001036 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}], 6, 18) = 1 ([{fd=15, revents=POLLIN}]) <0.000344>
+1778754068.001426 futex(0x7ffdf5a27680, FUTEX_WAKE_PRIVATE, 1) = 1 <0.000012>
+1778754068.001459 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}, {fd=26, events=POLLIN}], 7, 18) = 1 ([{fd=15, revents=POLLIN}]) <0.000329>
+1778754068.001844 futex(0x7ffdf5a27680, FUTEX_WAKE_PRIVATE, 1) = 1 <0.000012>
+1778754068.001878 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}, {fd=26, events=POLLIN}, {fd=28, events=POLLIN}], 8, 18) = 1 ([{fd=15, revents=POLLIN}]) <0.000338>
+1778754068.002260 futex(0x7ffdf5a27680, FUTEX_WAKE_PRIVATE, 1) = 1 <0.000008>
+1778754068.002283 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}, {fd=26, events=POLLIN}, {fd=28, events=POLLIN}, {fd=30, events=POLLIN}], 9, 17) = 1 ([{fd=15, revents=POLLIN}]) <0.002973>
+1778754068.005305 futex(0x7ffdf5a276f0, FUTEX_WAKE_PRIVATE, 1) = 1 <0.000014>
+1778754068.005338 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}, {fd=26, events=POLLIN}, {fd=28, events=POLLIN}, {fd=30, events=POLLIN}, {fd=31, events=POLLIN}], 10, 14) = 0 (Timeout) <0.014066>
+1778754068.019432 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}, {fd=26, events=POLLIN}, {fd=28, events=POLLIN}, {fd=30, events=POLLIN}, {fd=31, events=POLLIN}], 10, 100) = 0 (Timeout) <0.100122>
+1778754068.119589 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}, {fd=26, events=POLLIN}, {fd=28, events=POLLIN}, {fd=30, events=POLLIN}, {fd=31, events=POLLIN}], 10, 100) = 0 (Timeout) <0.100121>
+1778754068.219753 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}, {fd=26, events=POLLIN}, {fd=28, events=POLLIN}, {fd=30, events=POLLIN}, {fd=31, events=POLLIN}], 10, 100) = 0 (Timeout) <0.100110>
+1778754068.319906 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}, {fd=26, events=POLLIN}, {fd=28, events=POLLIN}, {fd=30, events=POLLIN}, {fd=31, events=POLLIN}], 10, 100) = 0 (Timeout) <0.100119>
+1778754068.420068 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}, {fd=26, events=POLLIN}, {fd=28, events=POLLIN}, {fd=30, events=POLLIN}, {fd=31, events=POLLIN}], 10, 100) = 0 (Timeout) <0.100116>
+1778754068.520224 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}, {fd=26, events=POLLIN}, {fd=28, events=POLLIN}, {fd=30, events=POLLIN}, {fd=31, events=POLLIN}], 10, 100) = 0 (Timeout) <0.100121>
+1778754068.620387 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}, {fd=26, events=POLLIN}, {fd=28, events=POLLIN}, {fd=30, events=POLLIN}, {fd=31, events=POLLIN}], 10, 100) = 0 (Timeout) <0.100121>
+1778754068.720547 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}, {fd=26, events=POLLIN}, {fd=28, events=POLLIN}, {fd=30, events=POLLIN}, {fd=31, events=POLLIN}], 10, 100) = 0 (Timeout) <0.100116>
+1778754068.820705 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}, {fd=26, events=POLLIN}, {fd=28, events=POLLIN}, {fd=30, events=POLLIN}, {fd=31, events=POLLIN}], 10, 100) = 0 (Timeout) <0.100134>
+1778754068.920884 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}, {fd=26, events=POLLIN}, {fd=28, events=POLLIN}, {fd=30, events=POLLIN}, {fd=31, events=POLLIN}], 10, 100) = 0 (Timeout) <0.100115>
+1778754069.021041 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}, {fd=26, events=POLLIN}, {fd=28, events=POLLIN}, {fd=30, events=POLLIN}, {fd=31, events=POLLIN}], 10, 100) = 0 (Timeout) <0.100121>
+1778754069.121198 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}, {fd=26, events=POLLIN}, {fd=28, events=POLLIN}, {fd=30, events=POLLIN}, {fd=31, events=POLLIN}], 10, 100) = 0 (Timeout) <0.100119>
+1778754069.221354 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}, {fd=26, events=POLLIN}, {fd=28, events=POLLIN}, {fd=30, events=POLLIN}, {fd=31, events=POLLIN}], 10, 100) = 0 (Timeout) <0.100118>
+1778754069.321511 poll([{fd=15, events=POLLIN}, {fd=17, events=POLLIN}, {fd=19, events=POLLIN}, {fd=21, events=POLLIN}, {fd=22, events=POLLIN}, {fd=24, events=POLLIN}, {fd=26, events=POLLIN}, {fd=28, events=POLLIN}, {fd=30, events=POLLIN}, {fd=31, events=POLLIN}], 10, 100 <unfinished ...>) = ?
+1778754069.374723 +++ exited with 0 +++

@@ -1,0 +1,8 @@
+1778685986.907244 mmap(NULL, 134217728, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fb3e3200000 <0.000018>
+1778685986.907301 munmap(0x7fb3e3200000, 14680064) = 0 <0.000020>
+1778685986.907351 munmap(0x7fb3e8000000, 52428800) = 0 <0.000016>
+1778685986.907407 mprotect(0x7fb3e4000000, 135168, PROT_READ|PROT_WRITE) = 0 <0.000009>
+1778685986.907456 poll([{fd=3, events=POLLIN}], 1, -1) = 1 ([{fd=3, revents=POLLIN}]) <0.000009>
+1778685986.907523 poll([{fd=3, events=POLLIN}, {fd=4, events=POLLIN}], 2, -1) = 1 ([{fd=3, revents=POLLIN}]) <0.073212>
+1778685986.980790 poll([{fd=3, events=POLLIN}, {fd=4, events=POLLIN}, {fd=14, events=POLLIN}], 3, -1 <unfinished ...>) = ?
+1778685993.888114 +++ exited with 0 +++

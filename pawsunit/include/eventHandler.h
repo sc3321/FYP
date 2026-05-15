@@ -7,7 +7,7 @@
 class eventHandler {
 public:
     FILE* fptr;
-    void writeEvent(gpuPhase& gpuPhase); 
+    void writeEvent(bool begin, gpuPhase& gpuPhase); 
 private:
 
 };

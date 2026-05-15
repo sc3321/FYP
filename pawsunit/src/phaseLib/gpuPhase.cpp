@@ -12,27 +12,50 @@
 using phase_id_t = uint64_t;
 static std::atomic<uint64_t> nextPhaseId{1};
 
-workload_Class getPriority(const char* inputPriority){
-    char* priority = strcpy(priority, inputPriority);
-    for(int i = 0; i < strlen(priority); ++i){
-        priority[i] = toupper(priority[i]);
-    }
-    if(strcmp(priority, "BE") == 0){
-        return workload_Class::BE;
-    } else if (strcmp(priority, "LC") == 0){
-        return workload_Class::LC;
-    }
-    else{
+workload_Class getPriority(const char* priority) {
+    if (priority == nullptr) {
         return workload_Class::UNK;
     }
-};
 
-gpuPhase::gpuPhase(const char* inputSemanticIdentifier,const char* priority){
+    if (strcmp(priority, "LC") == 0) {
+        return workload_Class::LC;
+    }
+
+    if (strcmp(priority, "BE") == 0) {
+        return workload_Class::BE;
+    }
+
+    if (strcmp(priority, "UNK") == 0) {
+        return workload_Class::UNK;
+    }
+
+    return workload_Class::UNK;
+}
+
+granularity getGranularity(const char* granularity) {
+    if (granularity == nullptr) {
+        return granularity::UNK;
+    }
+
+    if (strcmp(granularity, "SHORT") == 0) {
+        return granularity::SHORT;
+    }
+
+    if (strcmp(granularity, "LONG") == 0) {
+        return granularity::LONG;
+    }
+    return granularity::UNK;
+}
+
+gpuPhase::gpuPhase(const char* inputSemanticIdentifier,const char* priority, const char* granularity){
     semanticIdentifier = inputSemanticIdentifier;
     phaseMetadata.pid = getpid();
+    phaseMetadata.depth = 0;
+    phaseMetadata.parentId = 0;
     phaseMetadata.tid = gettid();
-    clock_gettime(CLOCK_MONOTONIC_COARSE, &phaseMetadata.timeNow); 
+    clock_gettime(CLOCK_MONOTONIC_COARSE, &phaseMetadata.startTime); 
     workloadClass = getPriority(priority);
+    workloadGranularity = getGranularity(granularity);
 }
 
 void phaseManager::initPhaseManager(){
@@ -43,24 +66,30 @@ void phaseManager::setPhaseId(gpuPhase& curPhase){
     curPhase.phaseMetadata.phaseId = {curPhase.phaseMetadata.pid, nextPhaseId.fetch_add(1, std::memory_order_relaxed)};
 }
 
-void phaseManager::updatePhaseTable(const gpuPhase& newPhase){
-   activePhases.curPhases.push(newPhase);
+void phaseManager::updatePhaseTable(gpuPhase& newPhase){
    if(newPhase.workloadClass == workload_Class::LC){
        activePhases.numLC += 1;
    }
+   if(!activePhases.curPhases.empty()){
+       gpuPhase& ref = activePhases.curPhases.top();
+       newPhase.phaseMetadata.parentId = ref.phaseMetadata.phaseId.second;
+       newPhase.phaseMetadata.depth = ref.phaseMetadata.depth + 1;
+   }
+   activePhases.curPhases.push(newPhase);
 }
 
-void phaseManager::phaseBegin(const char* semanticIdentifier, char* priority){
-    activePhases.curPhases.emplace(semanticIdentifier, priority);
-    gpuPhase& ref = activePhases.curPhases.top();
-    setPhaseId(ref);
-    updatePhaseTable(ref);
-     
+void phaseManager::phaseBegin(const char* semanticIdentifier, char* priority, const char* granularity){
+    gpuPhase newPhase(semanticIdentifier, priority, granularity);
+    // activePhases.curPhases.emplace(semanticIdentifier, priority);
+    setPhaseId(newPhase);
+    updatePhaseTable(newPhase);
+    phaseWriter->writeEvent(true, newPhase);
 }
 
 void phaseManager::phaseEnd(){
     gpuPhase& mostRecent = activePhases.curPhases.top();
-    phaseWriter->writeEvent(mostRecent);
+    clock_gettime(CLOCK_MONOTONIC_COARSE, &mostRecent.phaseMetadata.endTime); 
+    phaseWriter->writeEvent(false, mostRecent);
     activePhases.curPhases.pop();
 }
 

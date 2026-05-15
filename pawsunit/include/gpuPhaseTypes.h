@@ -19,19 +19,29 @@ enum class workload_Class{
     UNK
 };
 
+enum class granularity{
+    LONG,
+    SHORT,
+    UNK
+};
+
 typedef struct {
     pid_t pid;
     pid_t tid;
+    int parentId;
+    int depth;
     std::pair<pid_t, int> phaseId;
-    struct timespec timeNow;    
+    struct timespec startTime;
+    struct timespec endTime;
 } metadata;
 
 class gpuPhase{
     public:
-        gpuPhase(const char* semanticIdentifier, const char* priority);
+        gpuPhase(const char* semanticIdentifier, const char* priority, const char* granularity);
         ~gpuPhase() = default;
         workload_Class workloadClass;
         std::string semanticIdentifier;
+        granularity workloadGranularity;
         metadata phaseMetadata;
     private:
 };
@@ -45,10 +55,10 @@ class phaseManager{
     public:
         void initPhaseManager();
         ~phaseManager() = default;
-        void phaseBegin(const char* semanticIdentifier, char* priority);
+        void phaseBegin(const char* semanticIdentifier, char* priority, const char* granularity);
         void phaseEnd();
         void setPhaseId(gpuPhase& gpuPhase);
-        void updatePhaseTable(const gpuPhase& newPhase);
+        void updatePhaseTable(gpuPhase& newPhase);
         active_Phases activePhases;
         eventHandler* phaseWriter = nullptr;
     private:

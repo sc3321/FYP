@@ -10,6 +10,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <utility>
+#include "memManager.h"
 
 class eventHandler;
 
@@ -61,6 +62,8 @@ class phaseManager{
         void updatePhaseTable(gpuPhase& newPhase);
         active_Phases activePhases;
         eventHandler* phaseWriter = nullptr;
+        //policyAdditions
+        memManager* memoryManager;
     private:
 };
 

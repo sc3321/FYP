@@ -9,6 +9,8 @@
 #include <atomic>
 #include <threads.h>
 
+const char* sharedMemName = "sharedMemName";
+
 using phase_id_t = uint64_t;
 static std::atomic<uint64_t> nextPhaseId{1};
 
@@ -59,7 +61,9 @@ gpuPhase::gpuPhase(const char* inputSemanticIdentifier,const char* priority, con
 }
 
 void phaseManager::initPhaseManager(){
-   phaseWriter = (eventHandler*)std::malloc(sizeof(eventHandler)); 
+   phaseWriter   = (eventHandler*)std::malloc(sizeof(eventHandler));
+   void* rawBytes = (memManager*)std::malloc(sizeof(memManager));
+   memoryManager = ::new (rawBytes) memManager(sharedMemName);
 }
 
 void phaseManager::setPhaseId(gpuPhase& curPhase){

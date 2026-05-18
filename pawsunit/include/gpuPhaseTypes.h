@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <utility>
 #include "memManager.h"
+#include "policyManager.h"
 
 class eventHandler;
 
@@ -58,12 +59,13 @@ class phaseManager{
         ~phaseManager() = default;
         void phaseBegin(const char* semanticIdentifier, char* priority, const char* granularity);
         void phaseEnd();
-        void setPhaseId(gpuPhase& gpuPhase);
+        void setPhaseData(gpuPhase& gpuPhase);
         void updatePhaseTable(gpuPhase& newPhase);
         active_Phases activePhases;
         eventHandler* phaseWriter = nullptr;
         //policyAdditions
         memManager* memoryManager;
+        policyManager* policyManagerHandler;
     private:
 };
 

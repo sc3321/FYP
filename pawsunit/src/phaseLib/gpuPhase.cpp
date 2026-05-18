@@ -1,5 +1,6 @@
 #include "../../include/gpuPhaseTypes.h"
 #include "../../include/eventHandler.h"
+#include "../../include/policyManager.h"
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
@@ -64,10 +65,15 @@ void phaseManager::initPhaseManager(){
    phaseWriter   = (eventHandler*)std::malloc(sizeof(eventHandler));
    void* rawBytes = (memManager*)std::malloc(sizeof(memManager));
    memoryManager = ::new (rawBytes) memManager(sharedMemName);
+   void* rawBytesPolicy   = (policyManager*)std::malloc(sizeof(policyManager));
+   policyManagerHandler = ::new (rawBytesPolicy) policyManager(*memoryManager);
+    // check this logic, not sure if memoryManager pointer initialised at this stage at initPhaseManager.
 }
 
-void phaseManager::setPhaseId(gpuPhase& curPhase){
+void phaseManager::setPhaseData(gpuPhase& curPhase){
     curPhase.phaseMetadata.phaseId = {curPhase.phaseMetadata.pid, nextPhaseId.fetch_add(1, std::memory_order_relaxed)};
+    clock_gettime(CLOCK_MONOTONIC_COARSE, &curPhase.phaseMetadata.startTime); 
+
 }
 
 void phaseManager::updatePhaseTable(gpuPhase& newPhase){
@@ -84,9 +90,11 @@ void phaseManager::updatePhaseTable(gpuPhase& newPhase){
 
 void phaseManager::phaseBegin(const char* semanticIdentifier, char* priority, const char* granularity){
     gpuPhase newPhase(semanticIdentifier, priority, granularity);
-    // activePhases.curPhases.emplace(semanticIdentifier, priority);
-    setPhaseId(newPhase);
+    // Apply Policy(newPhase)
+    setPhaseData(newPhase);
+    // Apply other metadata now mainly TIMESTAMP, perhaps inside setPhaseId 
     updatePhaseTable(newPhase);
+    // policy data write point 
     phaseWriter->writeEvent(true, newPhase);
 }
 

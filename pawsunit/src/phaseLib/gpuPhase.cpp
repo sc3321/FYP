@@ -1,16 +1,17 @@
 #include "../../include/gpuPhaseTypes.h"
 #include "../../include/eventHandler.h"
-#include "../../include/policyManager.h"
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <iostream>
 #include <cstring>
 #include <ctime>
+#include <cerrno>
 #include <atomic>
 #include <threads.h>
 
-const char* sharedMemName = "sharedMemName";
+const char* sharedMemName = "/sharedMemName";
 
 using phase_id_t = uint64_t;
 static std::atomic<uint64_t> nextPhaseId{1};
@@ -62,12 +63,21 @@ gpuPhase::gpuPhase(const char* inputSemanticIdentifier,const char* priority, con
 }
 
 void phaseManager::initPhaseManager(){
-   phaseWriter   = (eventHandler*)std::malloc(sizeof(eventHandler));
+   void* rawWriter = (eventHandler*)std::malloc(sizeof(eventHandler));
+   if(rawWriter == nullptr){
+        throw "Could not allocate raw bytes for eventWriter";
+   }
+   phaseWriter = ::new (rawWriter) eventHandler();
    void* rawBytes = (memManager*)std::malloc(sizeof(memManager));
+   if(rawBytes == nullptr){
+        throw "Could not allocate raw bytes for memoryManager";
+   }
    memoryManager = ::new (rawBytes) memManager(sharedMemName);
    void* rawBytesPolicy   = (policyManager*)std::malloc(sizeof(policyManager));
+   if(rawBytesPolicy == nullptr){
+        throw "Could not allocate raw bytes for policyManager";
+   }
    policyManagerHandler = ::new (rawBytesPolicy) policyManager(*memoryManager);
-    // check this logic, not sure if memoryManager pointer initialised at this stage at initPhaseManager.
 }
 
 void phaseManager::setPhaseData(gpuPhase& curPhase){
@@ -92,18 +102,26 @@ void phaseManager::phaseBegin(const char* semanticIdentifier, char* priority, co
     gpuPhase newPhase(semanticIdentifier, priority, granularity);
     // Apply Policy(newPhase)
     setPhaseData(newPhase);
-    // Apply other metadata now mainly TIMESTAMP, perhaps inside setPhaseId 
     updatePhaseTable(newPhase);
-    // policy data write point 
+    policyManagerHandler->beginPDUpdate(newPhase);
+    policyManagerHandler->readPolicyData();
+    std::cout << "activeLC: " << policyManagerHandler->curReadData->activeLC << "   active BE: " << policyManagerHandler->curReadData->activeBELong << "\n";
     phaseWriter->writeEvent(true, newPhase);
 }
 
 void phaseManager::phaseEnd(){
     gpuPhase& mostRecent = activePhases.curPhases.top();
+    policyManagerHandler->endPDUpdate(mostRecent);
+    policyManagerHandler->readPolicyData();
+    std::cout << "activeLC: " << policyManagerHandler->curReadData->activeLC << "   active BE: " << policyManagerHandler->curReadData->activeBELong << "\n";
     clock_gettime(CLOCK_MONOTONIC_COARSE, &mostRecent.phaseMetadata.endTime); 
     phaseWriter->writeEvent(false, mostRecent);
     activePhases.curPhases.pop();
+     
 }
 
-
+void phaseManager::cleanup(){
+    munmap(memoryManager->ptrToShm, sizeof(policyData));
+    shm_unlink(sharedMemName);
+}
 

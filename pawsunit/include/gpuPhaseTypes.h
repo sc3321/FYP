@@ -64,8 +64,9 @@ class phaseManager{
         active_Phases activePhases;
         eventHandler* phaseWriter = nullptr;
         //policyAdditions
-        memManager* memoryManager;
-        policyManager* policyManagerHandler;
+        memManager* memoryManager = nullptr;
+        policyManager* policyManagerHandler = nullptr;
+        void cleanup();
     private:
 };
 

@@ -6,13 +6,16 @@
 
 class memManager;
 class gpuPhase;
+struct policyData;
 
 class policyManager{
     public:
         policyManager(memManager& memoryManager);
         void beginPDUpdate(gpuPhase& curPhase);
-        void endPDUpdate();
+        void endPDUpdate(gpuPhase& curPhase);
         void applyPolicy();
+        void readPolicyData();
+        policyData* curReadData;
     private:
         memManager* ptrMemoryManager;
 };

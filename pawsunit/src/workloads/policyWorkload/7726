@@ -1,0 +1,12 @@
+Event type = BEGIN: PhaseId:[7726, 1],Thread Id: 7726, parent_id: 0, depth: 0,  Timestamp: 533724 s 438823432 ns, phase type: (SETUP), workload class: UNK
+Event type = END: PhaseId:[7726, 1],Thread Id: 7726, parent_id: 0, depth: 0,  Timestamp: 533727 s 251853202 ns, phase type: (SETUP), workload class: UNK
+Event type = BEGIN: PhaseId:[7726, 2],Thread Id: 7726, parent_id: 0, depth: 0,  Timestamp: 533727 s 257853265 ns, phase type: (LC_REQUEST), workload class: LC
+Event type = BEGIN: PhaseId:[7726, 3],Thread Id: 7726, parent_id: 2, depth: 1,  Timestamp: 533727 s 259853286 ns, phase type: (LC_PREFILL_SUBMISSION), workload class: LC
+Event type = END: PhaseId:[7726, 3],Thread Id: 7726, parent_id: 2, depth: 1,  Timestamp: 533727 s 263853329 ns, phase type: (LC_PREFILL_SUBMISSION), workload class: LC
+Event type = BEGIN: PhaseId:[7726, 4],Thread Id: 7726, parent_id: 2, depth: 1,  Timestamp: 533727 s 266853361 ns, phase type: (LC_PREFILL_SYNC), workload class: LC
+Event type = END: PhaseId:[7726, 4],Thread Id: 7726, parent_id: 2, depth: 1,  Timestamp: 533727 s 269853392 ns, phase type: (LC_PREFILL_SYNC), workload class: LC
+Event type = BEGIN: PhaseId:[7726, 5],Thread Id: 7726, parent_id: 2, depth: 1,  Timestamp: 533727 s 272853424 ns, phase type: (LC_DECODE_STEP), workload class: LC
+Event type = END: PhaseId:[7726, 5],Thread Id: 7726, parent_id: 2, depth: 1,  Timestamp: 533727 s 278853487 ns, phase type: (LC_DECODE_STEP), workload class: LC
+Event type = END: PhaseId:[7726, 2],Thread Id: 7726, parent_id: 0, depth: 0,  Timestamp: 533727 s 281853519 ns, phase type: (LC_REQUEST), workload class: LC
+Event type = BEGIN: PhaseId:[7726, 6],Thread Id: 7726, parent_id: 0, depth: 0,  Timestamp: 533727 s 287853583 ns, phase type: (CLEANUP), workload class: UNK
+Event type = END: PhaseId:[7726, 6],Thread Id: 7726, parent_id: 0, depth: 0,  Timestamp: 533727 s 290853615 ns, phase type: (CLEANUP), workload class: UNK

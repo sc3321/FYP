@@ -3,6 +3,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <atomic>
 #include <unistd.h>
 #include <sys/file.h>
 #include <pthread.h>
@@ -29,14 +30,14 @@ struct policyData {
    long             BELongWaitCount     ;
    long long        BELongWaitns        ;
    int              BELongThrottleCount ;
-   bool             isInitialized       ;
+   std::atomic<bool>isInitialized       ;
    pthread_mutex_t  writeAllowed        ;
 };
 
 class memManager{
     public:
         memManager(const char* name);
-        int*        shm_fd   = nullptr;
+        int        shm_fd    =      -1;
         policyData* ptrToShm = nullptr;
         // add locking, mapping, sizing and modifying functions.
         // Generate a test program with read/write to the shared memory and test to see if it works

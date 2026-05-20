@@ -20,7 +20,9 @@ The priority is not to build every possible extension. The priority is to produc
 
 ## Goal
 
-Turn the working shared-memory state into a real policy mechanism.
+Turn the working shared-memory state into a real admission-control policy mechanism.
+
+The current experimental direction is evidence-led: earlier runs suggest that chunked BE work causes limited LC P95/P99 degradation even with multiple producers, while overlapping long BE phases are the main source of LC tail-latency degradation. Therefore, the initial policy should target **BE-long admission**, not BE-chunk throttling by default.
 
 ## Tasks
 
@@ -31,30 +33,52 @@ Turn the working shared-memory state into a real policy mechanism.
   - final counters return to zero
 - Add structured policy snapshots:
   - pid/tid
-  - event type
+  - timestamp
+  - event type: phase begin, phase end, policy decision, final state
   - phase type
   - workload class
   - granularity
   - active LC/BE state
-  - wait/admit/throttle counters
-- Add configurable BE delay:
-  - environment variable or CLI argument
-  - e.g. `BE_DELAY_US`
+  - BE-long policy counters
+  - BE-short/chunk observation counters
+- Add configurable BE-long admission control:
+  - environment variable or CLI argument for the long-BE concurrency cap, e.g. `BE_LONG_LIMIT`
+  - environment variable or CLI argument for retry/sleep delay, e.g. `BE_DELAY_US`
 - Implement first policy:
-  - if LC is active, delay BE chunk admission
-  - apply mainly at chunked BE boundaries
-  - do not pretend long BE can be interrupted mid-kernel
+  - if an incoming `BE_LONG` phase observes `active_be_long >= BE_LONG_LIMIT`, delay admission and re-check
+  - initial setting: `BE_LONG_LIMIT=1`, meaning only one BE-long phase may be active at a time
+  - apply this before the BE-long phase is pushed onto the active phase stack and before `active_be_long` is incremented
+  - do not throttle chunked BE by default unless later experiments show it is necessary
+  - do not pretend long BE can be interrupted mid-kernel; the control point is admission before the long phase begins
 - Run small sanity tests:
   - LC alone
   - BE long alone
   - BE chunked alone
   - LC + BE long + BE chunked
+  - LC + multiple BE-long producers with `BE_LONG_LIMIT=1`
+
+## Counter Definitions
+
+- `active_lc`: current number of active latency-critical phases. Incremented after an LC phase is admitted/begins. Decremented when that LC phase ends. Must return to zero at process/system shutdown.
+- `active_be_long`: current number of admitted BE-long phases. Incremented only after the BE-long admission policy allows the phase to begin. Decremented when that BE-long phase ends. This is the main state variable used by the initial policy.
+- `active_be_short`: current number of active BE-short/chunk phases. Incremented when a chunked BE phase begins and decremented when it ends. Used to observe coexistence and validate that chunked BE is not being unnecessarily throttled.
+- `policy_checks_total`: number of phase-begin events that reached the policy layer. This confirms that phase admission is actually routed through the policy mechanism.
+- `be_long_checks`: number of BE-long phase-begin events checked by the policy.
+- `be_long_admitted_immediate`: number of BE-long phases admitted without delay because `active_be_long < BE_LONG_LIMIT` at the point of admission.
+- `be_long_delayed_admissions`: number of BE-long admission attempts that were delayed at least once because `active_be_long >= BE_LONG_LIMIT`.
+- `be_long_delay_loops`: total number of delay/retry iterations applied to BE-long work. This may be greater than `be_long_delayed_admissions` if one phase sleeps and re-checks multiple times before admission.
+- `be_long_total_delay_us`: cumulative delay applied to BE-long admission, measured in microseconds. This is the main BE policy cost metric.
+- `be_short_checks`: number of BE-short/chunk phase-begin events observed by the policy layer.
+- `be_short_admitted_immediate`: number of BE-short/chunk phases admitted without delay. In the initial policy this should normally equal `be_short_checks`.
+- `be_short_delayed_admissions`: number of BE-short/chunk phases delayed by policy. For the initial policy this should remain zero; if non-zero, the implementation is no longer a pure BE-long admission policy.
+- `final_counter_mismatch`: diagnostic counter or final assertion result indicating that at least one active counter did not return to zero. This should be zero/false for every successful run.
 
 ## Exit Criteria
 
 - Three-way run completes reliably.
-- LC and BE coexist in shared state.
-- BE delay knob visibly changes BE behaviour.
+- LC, BE-long, and BE-short/chunk phases coexist in shared state.
+- `BE_LONG_LIMIT` and/or `BE_DELAY_US` visibly changes BE-long behaviour.
+- BE-short/chunk work is observed but not throttled by default.
 - Final active counters return to zero.
 
 ---
@@ -64,7 +88,7 @@ Turn the working shared-memory state into a real policy mechanism.
 
 ## Goal
 
-Produce the central result: LC latency versus BE throughput under policy.
+Produce the central result: LC latency versus BE throughput under BE-long admission control.
 
 ## Tasks
 
@@ -75,35 +99,40 @@ Run baseline cases:
 - BE chunked alone
 - LC + BE long, no policy
 - LC + BE chunked, no policy
+- LC + mixed BE long/chunked, no policy
 
-Run delay sweep:
+Run BE-long policy sweep:
 
-- `0us`
-- `50us`
-- `100us`
-- `250us`
-- `500us`
-- `1000us`
-- `2000us`
-- `5000us`
+- `BE_LONG_LIMIT=1`, `BE_DELAY_US=50us`
+- `BE_LONG_LIMIT=1`, `BE_DELAY_US=100us`
+- `BE_LONG_LIMIT=1`, `BE_DELAY_US=250us`
+- `BE_LONG_LIMIT=1`, `BE_DELAY_US=500us`
+- `BE_LONG_LIMIT=1`, `BE_DELAY_US=1000us`
+- `BE_LONG_LIMIT=1`, `BE_DELAY_US=2000us`
+- optional: compare `BE_LONG_LIMIT=2` if 4 BE-long producers are used
 
 Measure:
 
 - LC request mean/p50/p95/p99
 - LC prefill/sync/decode p95/p99
-- BE throughput
-- BE active time
-- BE wait count
-- BE total wait time
+- BE-long throughput
+- BE-chunked throughput
+- BE-long active time
+- BE-chunked active time
+- BE-long delayed admission count
+- BE-long delay-loop count
+- BE-long total admission delay
+- BE-short/chunk delayed admission count, expected to remain zero in the initial policy
 - LC/BE overlap
 
 ## Exit Criteria
 
 - Main policy plot exists:
-  - x-axis: BE delay
+  - x-axis: BE-long admission-control setting, e.g. delay or long-BE concurrency cap
   - left y-axis: LC p95/p99
-  - right y-axis: BE throughput
-- Results show whether policy improves LC tails and what it costs BE.
+  - right y-axis: BE-long throughput
+- Results show whether limiting overlapping BE-long phases improves LC tails and what it costs BE.
+- Results preserve the distinction that chunked BE is comparatively well-behaved and does not require default throttling.
 
 ---
 
@@ -137,15 +166,17 @@ Add kernel-size variation only if time permits:
 
 Analyse:
 
-- where policy works
-- where policy fails
-- whether chunked BE is more controllable than long BE
-- whether more BE workers increase LC tail pressure
+- where BE-long admission control works
+- where BE-long admission control fails
+- whether chunked BE remains safe enough to avoid throttling
+- whether more BE-long workers increase LC tail pressure
+- whether the long-BE concurrency cap gives a cleaner trade-off than delaying all BE work
 
 ## Exit Criteria
 
 - Clear long-vs-chunked comparison.
 - Clear 1-BE vs 4-BE comparison.
+- Clear evidence that the policy targets the workload form that actually harms LC latency.
 - At least one failure/limitation case documented.
 
 ---
@@ -465,7 +496,7 @@ Phase-scoped semantics expose workload class and control boundaries.
 
 A lightweight policy layer can use those semantics to pace BE work under LC activity.
 
-The benefit depends on granularity: chunked BE exposes safe intervention points, while long BE does not.
+The benefit depends on granularity: chunked BE appears comparatively well-behaved in the current measurements, while overlapping long BE phases create the main LC tail-latency degradation and must be controlled at admission because they cannot be interrupted mid-kernel.
 
 eBPF strengthens the host-side evaluation.
 

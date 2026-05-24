@@ -67,7 +67,10 @@ class phaseManager{
         memManager* memoryManager = nullptr;
         policyManager* policyManagerHandler = nullptr;
         void cleanup();
+        void setPolicyMode(policyMode mode);
     private:
+        policyMode currentPolicyMode = policyMode::NONE;
+
 };
 
 #endif

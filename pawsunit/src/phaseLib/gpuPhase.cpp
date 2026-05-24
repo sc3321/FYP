@@ -16,6 +16,11 @@ const char* sharedMemName = "/sharedMemName";
 using phase_id_t = uint64_t;
 static std::atomic<uint64_t> nextPhaseId{1};
 
+
+void phaseManager::setPolicyMode(policyMode mode){
+    currentPolicyMode = mode;
+}
+
 workload_Class getPriority(const char* priority) {
     if (priority == nullptr) {
         return workload_Class::UNK;
@@ -100,24 +105,18 @@ void phaseManager::updatePhaseTable(gpuPhase& newPhase){
 
 void phaseManager::phaseBegin(const char* semanticIdentifier, char* priority, const char* granularity){
     gpuPhase newPhase(semanticIdentifier, priority, granularity);
-    // Apply Policy(newPhase)
+    policyManagerHandler->applyPolicy(newPhase, currentPolicyMode); 
     setPhaseData(newPhase);
     updatePhaseTable(newPhase);
-    policyManagerHandler->beginPDUpdate(newPhase);
-    policyManagerHandler->readPolicyData();
-    std::cout << "activeLC: " << policyManagerHandler->curReadData->activeLC << "   active BE: " << policyManagerHandler->curReadData->activeBELong << "\n";
     phaseWriter->writeEvent(true, newPhase);
 }
 
 void phaseManager::phaseEnd(){
     gpuPhase& mostRecent = activePhases.curPhases.top();
     policyManagerHandler->endPDUpdate(mostRecent);
-    policyManagerHandler->readPolicyData();
-    std::cout << "activeLC: " << policyManagerHandler->curReadData->activeLC << "   active BE: " << policyManagerHandler->curReadData->activeBELong << "\n";
     clock_gettime(CLOCK_MONOTONIC_COARSE, &mostRecent.phaseMetadata.endTime); 
     phaseWriter->writeEvent(false, mostRecent);
     activePhases.curPhases.pop();
-     
 }
 
 void phaseManager::cleanup(){

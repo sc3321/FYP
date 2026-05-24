@@ -1,0 +1,20 @@
+class=BE mode=be-chunked policy=proper iters=80 chunks=8 n=1048576 lc_inner=64 be_inner=512
+MARKER_BE_CHUNKED_WORKER_BEGIN
+MARKER_BE_CHUNKED_WORKER_END
+
+[PolicyCounters] end_of_workload
+  policyChecks=1807
+  activeLC=0
+  activeBELong=0
+  activeBEChunked=1
+  beLongSawLCActive=137
+  BEImmAdmit=0
+  BEDelayAdmit=0
+  BEThrottleCount=0
+  BEWaitus=0
+  BELongImmAdmit=133
+  BELongDelayAdmit=27
+  BELongThrottleCount=137
+  BELongWaitus=1370000
+  configured_delay_us=10000
+

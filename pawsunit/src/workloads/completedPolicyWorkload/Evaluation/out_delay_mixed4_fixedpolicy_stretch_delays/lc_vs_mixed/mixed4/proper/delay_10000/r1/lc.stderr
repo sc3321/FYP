@@ -1,0 +1,20 @@
+class=LC mode=lc policy=proper iters=50 chunks=16 n=1048576 lc_inner=64 be_inner=512
+MARKER_LC_WORKER_BEGIN
+MARKER_LC_WORKER_END
+
+[PolicyCounters] end_of_workload
+  policyChecks=604
+  activeLC=0
+  activeBELong=2
+  activeBEChunked=3
+  beLongSawLCActive=147
+  BEImmAdmit=0
+  BEDelayAdmit=0
+  BEThrottleCount=0
+  BEWaitus=0
+  BELongImmAdmit=22
+  BELongDelayAdmit=32
+  BELongThrottleCount=147
+  BELongWaitus=1470000
+  configured_delay_us=10000
+

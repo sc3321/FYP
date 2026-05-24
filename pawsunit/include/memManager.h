@@ -23,15 +23,28 @@ class robustLockGuard {
 };
 
 struct policyData {
-   int              activeBELong        ;
-   int              activeLC            ;
-   int              activeBEChunked     ;
-   int              BELongAdmitCount    ;
-   long             BELongWaitCount     ;
-   long long        BELongWaitns        ;
-   int              BELongThrottleCount ;
-   std::atomic<bool>isInitialized       ;
-   pthread_mutex_t  writeAllowed        ;
+   int activeBELong;
+   int activeLC;
+   int activeBEChunked;
+
+   int policyChecks;
+
+   // Generic BE counters: useful for naive policy.
+   int       BEImmAdmit;
+   long      BEDelayAdmit;
+   long long BEWaitus;
+   int       BEThrottleCount;
+    
+   // debugging
+   int       beLongSawLCActive;
+   // BE-long-specific counters: useful for proper policy.
+   int       BELongImmAdmit;
+   long      BELongDelayAdmit;
+   long long BELongWaitus;
+   int       BELongThrottleCount;
+
+   std::atomic<bool> isInitialized;
+   pthread_mutex_t   writeAllowed;
 };
 
 class memManager{

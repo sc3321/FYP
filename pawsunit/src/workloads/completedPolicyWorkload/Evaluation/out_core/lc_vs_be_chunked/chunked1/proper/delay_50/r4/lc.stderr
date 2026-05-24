@@ -1,0 +1,3 @@
+class=LC mode=lc iters=50 chunks=16 n=1048576 lc_inner=64 be_inner=512
+MARKER_LC_WORKER_BEGIN
+MARKER_LC_WORKER_END

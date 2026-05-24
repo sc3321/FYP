@@ -1,0 +1,20 @@
+class=BE mode=be-long policy=proper iters=80 chunks=8 n=1048576 lc_inner=64 be_inner=512
+MARKER_BE_LONG_WORKER_BEGIN
+MARKER_BE_LONG_WORKER_END
+
+[PolicyCounters] end_of_workload
+  policyChecks=529
+  activeLC=0
+  activeBELong=1
+  activeBEChunked=0
+  beLongSawLCActive=81
+  BEImmAdmit=0
+  BEDelayAdmit=0
+  BEThrottleCount=0
+  BEWaitus=0
+  BELongImmAdmit=299
+  BELongDelayAdmit=21
+  BELongThrottleCount=81
+  BELongWaitus=4050000
+  configured_delay_us=50000
+

@@ -1,0 +1,4 @@
+case,worker_config,policy,delay_us,total_be_workers,long_be_workers,chunked_be_workers,n,lc_p95_ms_mean,lc_p99_ms_mean,be_agg_thr_s_mean,be_wall_ms_mean,overlap_union_ms_mean,overlap_weighted_ms_mean,overlap_count_mean,max_concurrent_be_mean
+lc_vs_be_chunked,chunked1,none,0,1,0,1,5,21.11016808,21.910174378,16.66475656164987,4800.638163,19.364153904,19.364153904,1.328,1.0
+lc_vs_be_long,long1,none,0,1,1,0,5,21.82017365,22.302177416,68.84726466815451,1162.0092358,15.408122484,15.408122484,1.992,0.94
+lc_vs_mixed,mixed2,none,0,2,1,1,5,21.71017288,22.502178816,32.80579173890458,4877.2387908,20.2921614,36.328288964,3.308,2.0

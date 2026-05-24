@@ -51,10 +51,16 @@ memManager::memManager(const char* name){
 
        ptrToShm->activeBELong          = 0;       
        ptrToShm->activeLC              = 0;           
-       ptrToShm->activeBEChunked       = 0;   
-       ptrToShm->BELongAdmitCount      = 0; 
-       ptrToShm->BELongWaitCount       = 0; 
-       ptrToShm->BELongWaitns          = 0; 
+       ptrToShm->activeBEChunked       = 0;
+
+       ptrToShm->BEImmAdmit            = 0;
+       ptrToShm->BEDelayAdmit          = 0;
+       ptrToShm->BEWaitus              = 0;
+       ptrToShm->BEThrottleCount       = 0;
+       ptrToShm->beLongSawLCActive     = 0;
+       ptrToShm->BELongImmAdmit        = 0; 
+       ptrToShm->BELongDelayAdmit      = 0; 
+       ptrToShm->BELongWaitus          = 0; 
        ptrToShm->BELongThrottleCount   = 0; 
        
        ptrToShm->isInitialized.store(true, std::memory_order_release);

@@ -3,3 +3,5 @@ build/
 **/trace.*
 **/*.txt
 **/out/
+llama_validation/llama.cpp/
+llama_validation/models/

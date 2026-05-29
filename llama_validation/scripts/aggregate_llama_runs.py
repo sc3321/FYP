@@ -23,8 +23,12 @@ IMPORTANT_NUMERIC_COLS = [
     "be_request_p50_ms",
     "be_request_p95_ms",
     "be_request_p99_ms",
+    "be_long_request_p50_ms",
     "be_long_request_p95_ms",
+    "be_long_request_p99_ms",
+    "be_short_request_p50_ms",
     "be_short_request_p95_ms",
+    "be_short_request_p99_ms",
 
     # decode-level phase durations
     "lc_decode_p50_ms",
@@ -33,8 +37,12 @@ IMPORTANT_NUMERIC_COLS = [
     "be_decode_p50_ms",
     "be_decode_p95_ms",
     "be_decode_p99_ms",
+    "be_long_decode_p50_ms",
     "be_long_decode_p95_ms",
+    "be_long_decode_p99_ms",
+    "be_short_decode_p50_ms",
     "be_short_decode_p95_ms",
+    "be_short_decode_p99_ms",
 
     # overlaps
     "request_lc_be_overlap_ms",
@@ -140,20 +148,17 @@ def main():
         print(f"ERROR: no rows found under {master_dir}/run_*/summary.csv", file=sys.stderr)
         sys.exit(1)
 
-    # Group by case metadata.
     groups = {}
     for row in rows:
         key = tuple(row.get(c, "") for c in KEY_COLS)
         groups.setdefault(key, []).append(row)
 
-    # Only aggregate columns that actually exist.
     available_cols = set()
     for row in rows:
         available_cols.update(row.keys())
 
     numeric_cols = [c for c in IMPORTANT_NUMERIC_COLS if c in available_cols]
 
-    # Add any remaining numeric-looking columns too.
     for c in sorted(available_cols):
         if c in numeric_cols or c in KEY_COLS or c.startswith("_") or c == "case_dir":
             continue
@@ -161,7 +166,6 @@ def main():
         if any(v is not None for v in vals):
             numeric_cols.append(c)
 
-    # Long-form aggregate: one row per case+metric.
     long_csv = master_dir / "aggregate_long.csv"
     with open(long_csv, "w", newline="") as f:
         fieldnames = KEY_COLS + ["metric", "n", "mean", "median", "stdev", "min", "p25", "p75", "max"]
@@ -178,7 +182,6 @@ def main():
                 out.update({k: fmt(v) for k, v in s.items()})
                 w.writerow(out)
 
-    # Wide-form aggregate: one row per case, metric_median/metric_mean/metric_stdev columns.
     wide_csv = master_dir / "aggregate_wide.csv"
     with open(wide_csv, "w", newline="") as f:
         fieldnames = KEY_COLS + ["valid_runs"]
@@ -189,6 +192,8 @@ def main():
                 f"{col}_stdev",
                 f"{col}_p25",
                 f"{col}_p75",
+                f"{col}_min",
+                f"{col}_max",
             ]
 
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -206,31 +211,72 @@ def main():
                 out[f"{col}_stdev"] = fmt(s["stdev"])
                 out[f"{col}_p25"] = fmt(s["p25"])
                 out[f"{col}_p75"] = fmt(s["p75"])
+                out[f"{col}_min"] = fmt(s["min"])
+                out[f"{col}_max"] = fmt(s["max"])
 
             w.writerow(out)
 
-    # Compact report table for the columns you likely care about most.
+    # Compact report table now explicitly includes P50, P95 and P99.
     report_csv = master_dir / "aggregate_report_table.csv"
     report_metrics = [
+        # client latency
+        "lc_client_p50_ms",
         "lc_client_p95_ms",
+        "lc_client_p99_ms",
+        "be_client_p50_ms",
         "be_client_p95_ms",
+        "be_client_p99_ms",
+
+        # request-level duration
+        "lc_request_p50_ms",
+        "lc_request_p95_ms",
+        "lc_request_p99_ms",
+        "be_request_p50_ms",
+        "be_request_p95_ms",
+        "be_request_p99_ms",
+        "be_long_request_p50_ms",
+        "be_long_request_p95_ms",
+        "be_long_request_p99_ms",
+        "be_short_request_p50_ms",
+        "be_short_request_p95_ms",
+        "be_short_request_p99_ms",
+
+        # decode-level duration
+        "lc_decode_p50_ms",
+        "lc_decode_p95_ms",
+        "lc_decode_p99_ms",
+        "be_decode_p50_ms",
+        "be_decode_p95_ms",
+        "be_decode_p99_ms",
+        "be_long_decode_p50_ms",
+        "be_long_decode_p95_ms",
+        "be_long_decode_p99_ms",
+        "be_short_decode_p50_ms",
+        "be_short_decode_p95_ms",
+        "be_short_decode_p99_ms",
+
+        # overlaps
         "request_lc_be_overlap_ms",
         "request_lc_be_long_overlap_ms",
         "request_lc_be_short_overlap_ms",
         "decode_lc_be_overlap_ms",
         "decode_lc_be_long_overlap_ms",
         "decode_lc_be_short_overlap_ms",
-        "lc_request_p95_ms",
-        "be_request_p95_ms",
-        "lc_decode_p95_ms",
-        "be_decode_p95_ms",
     ]
     report_metrics = [m for m in report_metrics if m in available_cols]
 
     with open(report_csv, "w", newline="") as f:
         fieldnames = KEY_COLS + ["valid_runs"]
         for m in report_metrics:
-            fieldnames += [f"{m}_median", f"{m}_mean", f"{m}_stdev"]
+            fieldnames += [
+                f"{m}_median",
+                f"{m}_mean",
+                f"{m}_stdev",
+                f"{m}_p25",
+                f"{m}_p75",
+                f"{m}_min",
+                f"{m}_max",
+            ]
 
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
@@ -245,6 +291,10 @@ def main():
                 out[f"{m}_median"] = fmt(s["median"])
                 out[f"{m}_mean"] = fmt(s["mean"])
                 out[f"{m}_stdev"] = fmt(s["stdev"])
+                out[f"{m}_p25"] = fmt(s["p25"])
+                out[f"{m}_p75"] = fmt(s["p75"])
+                out[f"{m}_min"] = fmt(s["min"])
+                out[f"{m}_max"] = fmt(s["max"])
 
             w.writerow(out)
 

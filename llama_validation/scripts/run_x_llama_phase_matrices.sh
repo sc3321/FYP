@@ -4,22 +4,13 @@ set -euo pipefail
 # ==============================================================================
 # Repeated llama.cpp phase matrix runner
 #
-# What this does:
-#   1. Runs scripts/run_llama_phase_matrix.sh N times.
-#   2. Finds the newly-created runs/llama_phase_matrix_* directory each time.
-#   3. Runs analyse_llama_phase_matrix.py on that individual run.
-#   4. Copies/moves each run into one master output directory:
-#          runs/llama_phase_repeated_<timestamp>/run_001/
-#          runs/llama_phase_repeated_<timestamp>/run_002/
-#          ...
-#   5. Writes per-run status, logs, and metadata.
+# Default N_RUNS=25 is calibrated for N_LC=50 inside each matrix run, which
+# gives ~17 hours total wallclock. Use 20 for an overnight run, 25-30 if you
+# can leave it longer. For very quick smoke-test, pass 3 on the command line.
 #
-# Expected project root:
-#   /vol/bitbucket/sc3321/FYP/llama_validation
-#
-# Assumes these scripts already exist:
-#   scripts/run_llama_phase_matrix.sh
-#   scripts/analyse_llama_phase_matrix.py
+# Each matrix run produces 8 cases, with warmup before each timed measurement.
+# All cold-start artefacts (model load, JIT, CUDA context, KV cache prefix)
+# should be cleared by the warmup phase before measured requests begin.
 # ==============================================================================
 
 ROOT="/vol/bitbucket/sc3321/FYP/llama_validation"
@@ -57,10 +48,6 @@ if [[ ! -f "$ANALYSER" ]]; then
   exit 1
 fi
 
-# ------------------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------------------
-
 timestamp() {
   date +"%Y-%m-%d %H:%M:%S"
 }
@@ -68,8 +55,6 @@ timestamp() {
 kill_old_servers() {
   pkill -u "$USER" -f llama-server 2>/dev/null || true
   rm -f /dev/shm/gpuphase_gpu0 2>/dev/null || true
-
-  # Give ports/processes a moment to release.
   sleep 1
 }
 
@@ -132,12 +117,10 @@ EOF
 
 write_master_metadata
 
-# Save copies of the exact scripts used.
 mkdir -p "${MASTER_OUT}/scripts_used"
 cp "$RUNNER" "${MASTER_OUT}/scripts_used/run_llama_phase_matrix.sh"
 cp "$ANALYSER" "${MASTER_OUT}/scripts_used/analyse_llama_phase_matrix.py"
 
-# Capture some environment/debug info.
 {
   echo "===== date ====="
   date
@@ -159,10 +142,6 @@ cp "$ANALYSER" "${MASTER_OUT}/scripts_used/analyse_llama_phase_matrix.py"
   echo "===== relevant env ====="
   env | grep -E "GPU_PHASE|POLICY|BE_DELAY|CUDA|LLAMA|GGML" || true
 } > "${MASTER_OUT}/environment_before.txt" 2>&1
-
-# ------------------------------------------------------------------------------
-# Main loop
-# ------------------------------------------------------------------------------
 
 STATUS_CSV="${MASTER_OUT}/run_status.csv"
 
@@ -281,8 +260,6 @@ for run_idx in $(seq 1 "$N_RUNS"); do
   if [[ "$run_status" == "OK" ]]; then
     success_count=$(( success_count + 1 ))
 
-    # source_run_dir/dest_run_dir/event_count were set inside subshell redirection
-    # but shell variables from the block are still available because this is not a pipeline.
     if [[ -d "$dest_run_dir" ]]; then
       event_count="$(count_events "$dest_run_dir")"
     fi
@@ -292,7 +269,6 @@ for run_idx in $(seq 1 "$N_RUNS"); do
     fail_count=$(( fail_count + 1 ))
     echo "[$end_time] $run_label FAILED after ${duration_s}s. See log: $run_log" >&2
 
-    # Preserve a failure snapshot if a matrix directory was created but not moved.
     failed_latest="$(latest_matrix_dir)"
     if [[ -n "$failed_latest" && -d "$failed_latest" ]]; then
       failed_dest="${MASTER_OUT}/${run_label}_FAILED_partial"
@@ -307,13 +283,8 @@ for run_idx in $(seq 1 "$N_RUNS"); do
 
   echo "${run_idx},${run_status},${source_run_dir},${dest_run_dir},${event_count},${start_time},${end_time},${duration_s}" >> "$STATUS_CSV"
 
-  # Short pause between runs to let GPU/server state settle a bit.
   sleep 3
 done
-
-# ------------------------------------------------------------------------------
-# Final summary
-# ------------------------------------------------------------------------------
 
 {
   echo

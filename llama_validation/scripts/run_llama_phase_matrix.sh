@@ -10,12 +10,23 @@ OUT_ROOT="${ROOT}/runs/llama_phase_matrix_$(date +%Y%m%d_%H%M%S)"
 LC_PORT=8080
 BE_PORT=8081
 
-N_LC=10
-N_BE_LONG=5
-N_BE_SHORT=20
+# Increased request counts for statistically meaningful tail percentiles.
+# With N_LC=50, p95 is the avg of obs 47-50; p99 is obs 50 (still limited but
+# meaningful). Previous N_LC=10 made p99 == p95 (both were max), which is
+# percentile-resolution-degenerate.
+N_LC=50
+N_BE_LONG=25
+N_BE_SHORT=50
 
-N_LC_LONG=3
-N_BE_LONG_TRIGGER=3
+N_LC_LONG=15
+N_BE_LONG_TRIGGER=15
+
+# Warmup: throwaway requests issued before timed measurement begins, to clear
+# cold-start artefacts (model load, CUDA context creation, JIT compilation,
+# KV cache prefix population, driver state stabilisation). Discarded entirely
+# from results.
+N_WARMUP_LC=3
+N_WARMUP_BE=2
 
 SHM_NAME="/gpuphase_gpu0"
 BE_DELAY_US=5000
@@ -28,9 +39,14 @@ N_GPU_LAYERS=99
 mkdir -p "$OUT_ROOT"
 
 echo "Output directory: $OUT_ROOT"
-echo "Server: $SERVER"
-echo "Model: $MODEL"
-echo "GPU layers: $N_GPU_LAYERS"
+echo "Server:           $SERVER"
+echo "Model:            $MODEL"
+echo "GPU layers:       $N_GPU_LAYERS"
+echo "N_LC:             $N_LC (warmup: $N_WARMUP_LC)"
+echo "N_BE_LONG:        $N_BE_LONG (warmup: $N_WARMUP_BE)"
+echo "N_BE_SHORT:       $N_BE_SHORT (warmup: $N_WARMUP_BE)"
+echo "N_LC_LONG:        $N_LC_LONG"
+echo "N_BE_LONG_TRIGGER:$N_BE_LONG_TRIGGER"
 
 if [[ ! -x "$SERVER" ]]; then
   echo "ERROR: llama-server not executable at $SERVER" >&2
@@ -62,16 +78,11 @@ cleanup_servers() {
 
 kill_stale_servers() {
   cleanup_servers
-
-  # Kill any previous llama-server instances owned by this user.
   pkill -u "$USER" -f "llama-server" 2>/dev/null || true
-
-  # Also clear port users if fuser exists.
   if command -v fuser >/dev/null 2>&1; then
     fuser -k "${LC_PORT}/tcp" 2>/dev/null || true
     fuser -k "${BE_PORT}/tcp" 2>/dev/null || true
   fi
-
   sleep 1
 }
 
@@ -219,6 +230,15 @@ JSON
 }
 JSON
 
+  elif [[ "$kind" == "warmup" ]]; then
+    cat <<'JSON'
+{
+  "prompt": "Briefly mention one thing.",
+  "n_predict": 16,
+  "stream": false
+}
+JSON
+
   else
     echo "unknown kind: $kind" >&2
     exit 1
@@ -236,7 +256,6 @@ validate_response() {
     return 1
   fi
 
-  # Only fail on an actual JSON error field, not the word "error" inside generated text.
   if grep -qiE '"error"[[:space:]]*:' "$response_file"; then
     echo "ERROR: bad response for kind=$kind port=$port request=$i" >&2
     cat "$response_file" >&2
@@ -248,6 +267,31 @@ validate_response() {
     head -c 500 "$response_file" >&2 || true
     echo >&2
   fi
+}
+
+# Warmup: issue throwaway requests that are NOT logged to client jsonl, and
+# whose responses are discarded. This clears cold-start artefacts before timed
+# measurement begins.
+warmup_client() {
+  local port="$1"
+  local n="$2"
+  local label="$3"
+
+  if [[ "$n" -le 0 ]]; then
+    return 0
+  fi
+
+  echo "Warming up $label on port $port ($n requests)..."
+
+  for i in $(seq 1 "$n"); do
+    if ! request_payload "warmup" | curl -fsS "http://127.0.0.1:${port}/completion" \
+      -H "Content-Type: application/json" \
+      -d @- > /dev/null 2>&1; then
+      echo "WARNING: warmup request $i failed for $label port=$port" >&2
+    fi
+  done
+
+  echo "Warmup complete for $label."
 }
 
 run_client() {
@@ -311,6 +355,8 @@ n_be_long=${N_BE_LONG}
 n_be_short=${N_BE_SHORT}
 n_lc_long=${N_LC_LONG}
 n_be_long_trigger=${N_BE_LONG_TRIGGER}
+n_warmup_lc=${N_WARMUP_LC}
+n_warmup_be=${N_WARMUP_BE}
 shm_name=${SHM_NAME}
 be_delay_us=${BE_DELAY_US}
 max_delay_loops=${MAX_DELAY_LOOPS}
@@ -320,6 +366,11 @@ np=1
 CONFIG
 }
 
+# Event-count thresholds are calculated as the minimum expected number of
+# BEGIN+END phase events for the timed (non-warmup) portion of the case.
+# llama-server emits one LLAMA_REQUEST phase (BEGIN+END = 2 events) plus
+# many LLAMA_DECODE phases per request. The threshold uses only LLAMA_REQUEST
+# events: 2 events per request. We are deliberately conservative.
 check_case_events() {
   local case_dir="$1"
   local expected_min="$2"
@@ -336,6 +387,10 @@ check_case_events() {
   fi
 }
 
+# ------------------------------------------------------------------------------
+# Cases
+# ------------------------------------------------------------------------------
+
 run_case_lc_alone() {
   local case_dir="${OUT_ROOT}/caseA_lc_alone_none"
   mkdir -p "$case_dir"
@@ -345,9 +400,12 @@ run_case_lc_alone() {
   save_config "$case_dir" "lc_alone_none" "NONE" "none" "single"
 
   start_lc_server "${case_dir}/lc_events" "NONE"
+  warmup_client "$LC_PORT" "$N_WARMUP_LC" "LC"
   run_client "$LC_PORT" "lc" "$N_LC" "${case_dir}/lc_client.jsonl"
 
-  check_case_events "$case_dir" 20
+  # 2 events per LC request, plus warmup events (warmup also produces events
+  # but we set the threshold using only the timed portion conservatively).
+  check_case_events "$case_dir" "$(( 2 * N_LC ))"
   cleanup_servers
 }
 
@@ -360,9 +418,10 @@ run_case_be_long_alone() {
   save_config "$case_dir" "be_long_alone_none" "NONE" "LONG" "single"
 
   start_be_server "${case_dir}/be_events" "NONE" "LONG"
+  warmup_client "$BE_PORT" "$N_WARMUP_BE" "BE"
   run_client "$BE_PORT" "be_long" "$N_BE_LONG" "${case_dir}/be_client.jsonl"
 
-  check_case_events "$case_dir" 10
+  check_case_events "$case_dir" "$(( 2 * N_BE_LONG ))"
   cleanup_servers
 }
 
@@ -377,6 +436,10 @@ run_case_lc_be_long_none_be_first() {
   start_lc_server "${case_dir}/lc_events" "NONE"
   start_be_server "${case_dir}/be_events" "NONE" "LONG"
 
+  # Warm up both servers BEFORE the timed parallel run.
+  warmup_client "$LC_PORT" "$N_WARMUP_LC" "LC"
+  warmup_client "$BE_PORT" "$N_WARMUP_BE" "BE"
+
   run_client "$BE_PORT" "be_long" "$N_BE_LONG" "${case_dir}/be_client.jsonl" &
   local c_be=$!
 
@@ -388,7 +451,7 @@ run_case_lc_be_long_none_be_first() {
   wait "$c_be"
   wait "$c_lc"
 
-  check_case_events "$case_dir" 30
+  check_case_events "$case_dir" "$(( 2 * (N_LC + N_BE_LONG) ))"
   cleanup_servers
 }
 
@@ -403,6 +466,9 @@ run_case_lc_be_long_policy_be_first() {
   start_lc_server "${case_dir}/lc_events" "CAP"
   start_be_server "${case_dir}/be_events" "CAP" "LONG"
 
+  warmup_client "$LC_PORT" "$N_WARMUP_LC" "LC"
+  warmup_client "$BE_PORT" "$N_WARMUP_BE" "BE"
+
   run_client "$BE_PORT" "be_long" "$N_BE_LONG" "${case_dir}/be_client.jsonl" &
   local c_be=$!
 
@@ -414,7 +480,7 @@ run_case_lc_be_long_policy_be_first() {
   wait "$c_be"
   wait "$c_lc"
 
-  check_case_events "$case_dir" 30
+  check_case_events "$case_dir" "$(( 2 * (N_LC + N_BE_LONG) ))"
   cleanup_servers
 }
 
@@ -429,6 +495,9 @@ run_case_lc_be_short_none() {
   start_lc_server "${case_dir}/lc_events" "NONE"
   start_be_server "${case_dir}/be_events" "NONE" "SHORT"
 
+  warmup_client "$LC_PORT" "$N_WARMUP_LC" "LC"
+  warmup_client "$BE_PORT" "$N_WARMUP_BE" "BE"
+
   run_client "$BE_PORT" "be_short" "$N_BE_SHORT" "${case_dir}/be_client.jsonl" &
   local c_be=$!
 
@@ -440,7 +509,7 @@ run_case_lc_be_short_none() {
   wait "$c_be"
   wait "$c_lc"
 
-  check_case_events "$case_dir" 60
+  check_case_events "$case_dir" "$(( 2 * (N_LC + N_BE_SHORT) ))"
   cleanup_servers
 }
 
@@ -455,6 +524,9 @@ run_case_lc_be_short_policy() {
   start_lc_server "${case_dir}/lc_events" "CAP"
   start_be_server "${case_dir}/be_events" "CAP" "SHORT"
 
+  warmup_client "$LC_PORT" "$N_WARMUP_LC" "LC"
+  warmup_client "$BE_PORT" "$N_WARMUP_BE" "BE"
+
   run_client "$BE_PORT" "be_short" "$N_BE_SHORT" "${case_dir}/be_client.jsonl" &
   local c_be=$!
 
@@ -466,7 +538,7 @@ run_case_lc_be_short_policy() {
   wait "$c_be"
   wait "$c_lc"
 
-  check_case_events "$case_dir" 60
+  check_case_events "$case_dir" "$(( 2 * (N_LC + N_BE_SHORT) ))"
   cleanup_servers
 }
 
@@ -481,6 +553,9 @@ run_case_lc_first_be_long_none() {
   start_lc_server "${case_dir}/lc_events" "NONE"
   start_be_server "${case_dir}/be_events" "NONE" "LONG"
 
+  warmup_client "$LC_PORT" "$N_WARMUP_LC" "LC"
+  warmup_client "$BE_PORT" "$N_WARMUP_BE" "BE"
+
   run_client "$LC_PORT" "lc_long" "$N_LC_LONG" "${case_dir}/lc_client.jsonl" &
   local c_lc=$!
 
@@ -492,7 +567,7 @@ run_case_lc_first_be_long_none() {
   wait "$c_lc"
   wait "$c_be"
 
-  check_case_events "$case_dir" 12
+  check_case_events "$case_dir" "$(( 2 * (N_LC_LONG + N_BE_LONG_TRIGGER) ))"
   cleanup_servers
 }
 
@@ -507,6 +582,9 @@ run_case_lc_first_be_long_policy() {
   start_lc_server "${case_dir}/lc_events" "CAP"
   start_be_server "${case_dir}/be_events" "CAP" "LONG"
 
+  warmup_client "$LC_PORT" "$N_WARMUP_LC" "LC"
+  warmup_client "$BE_PORT" "$N_WARMUP_BE" "BE"
+
   run_client "$LC_PORT" "lc_long" "$N_LC_LONG" "${case_dir}/lc_client.jsonl" &
   local c_lc=$!
 
@@ -518,7 +596,7 @@ run_case_lc_first_be_long_policy() {
   wait "$c_lc"
   wait "$c_be"
 
-  check_case_events "$case_dir" 12
+  check_case_events "$case_dir" "$(( 2 * (N_LC_LONG + N_BE_LONG_TRIGGER) ))"
   cleanup_servers
 }
 

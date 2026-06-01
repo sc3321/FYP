@@ -18,7 +18,7 @@ N_LC=50
 N_BE_LONG=25
 N_BE_SHORT=50
 
-N_LC_LONG=15
+N_LC_LONG=30
 N_BE_LONG_TRIGGER=15
 
 # Warmup: throwaway requests issued before timed measurement begins, to clear
@@ -31,7 +31,6 @@ N_WARMUP_BE=2
 SHM_NAME="/gpuphase_gpu0"
 BE_DELAY_US=5000
 MAX_DELAY_LOOPS=100000
-BE_LONG_LIMIT=1
 
 # Change this to 20/40 if you hit CUDA OOM with two servers.
 N_GPU_LAYERS=99
@@ -144,7 +143,6 @@ start_lc_server() {
   GPU_PHASE_LOG_DIR="$log_dir" \
   POLICY_MODE="$policy" \
   BE_DELAY_US="$BE_DELAY_US" \
-  GPU_PHASE_BE_LONG_LIMIT="$BE_LONG_LIMIT" \
   GPU_PHASE_MAX_DELAY_LOOPS="$MAX_DELAY_LOOPS" \
   GPU_PHASE_WORKLOAD_CLASS=LC \
   GPU_PHASE_GRANULARITY=SHORT \
@@ -174,7 +172,6 @@ start_be_server() {
   GPU_PHASE_LOG_DIR="$log_dir" \
   POLICY_MODE="$policy" \
   BE_DELAY_US="$BE_DELAY_US" \
-  GPU_PHASE_BE_LONG_LIMIT="$BE_LONG_LIMIT" \
   GPU_PHASE_MAX_DELAY_LOOPS="$MAX_DELAY_LOOPS" \
   GPU_PHASE_WORKLOAD_CLASS=BE \
   GPU_PHASE_GRANULARITY="$gran" \
@@ -360,7 +357,6 @@ n_warmup_be=${N_WARMUP_BE}
 shm_name=${SHM_NAME}
 be_delay_us=${BE_DELAY_US}
 max_delay_loops=${MAX_DELAY_LOOPS}
-be_long_limit=${BE_LONG_LIMIT}
 ngl=${N_GPU_LAYERS}
 np=1
 CONFIG

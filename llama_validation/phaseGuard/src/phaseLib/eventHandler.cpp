@@ -44,7 +44,7 @@ void eventHandler::writeEvent(bool begin, gpuPhase& phase){
        free(fileName);
        return;
     }
-
+    char *usepolicy = (char*)std::malloc(8 * sizeof(char));
     char phaseData[720];
     char *threadId = (char*)std::malloc(64 * sizeof(char));
     char *semanticInfo = (char*)std::malloc(128 * sizeof(char));
@@ -52,7 +52,12 @@ void eventHandler::writeEvent(bool begin, gpuPhase& phase){
     char *phaseGran = (char*)std::malloc(64 * sizeof(char));
     char *phaseId = (char*)std::malloc(128 * sizeof(char));
 
-
+    if(phase.getPolicyInformation()){
+        strcpy(usepolicy, "true");
+    }
+    else{
+        strcpy(usepolicy, "false");
+    }
     snprintf(threadId, 64, "%d", (int)phase.phaseMetadata.tid);
     strcpy(workloadClass, workloadClasstoString(phase.workloadClass));
     strcpy(phaseGran, granularitytoString(phase.workloadGranularity));
@@ -60,7 +65,7 @@ void eventHandler::writeEvent(bool begin, gpuPhase& phase){
     snprintf(phaseId, 128, "%ld, %d", (long)phase.phaseMetadata.phaseId.first, phase.phaseMetadata.phaseId.second);
 
     if(begin){
-        snprintf(phaseData, sizeof(phaseData),"Event type = BEGIN: PhaseId:[%s],Thread Id: %s, parent_id: %d, depth: %d,  Timestamp: %ld s %ld ns, phase type: (%s), workload class: %s, granularity: %s\n",
+        snprintf(phaseData, sizeof(phaseData),"Event type = BEGIN: PhaseId:[%s],Thread Id: %s, parent_id: %d, depth: %d,  Timestamp: %ld s %ld ns, phase type: (%s), workload class: %s, granularity: %s, usedPolicy?: %s\n",
          phaseId,
          threadId,
          phase.phaseMetadata.parentId,
@@ -69,10 +74,11 @@ void eventHandler::writeEvent(bool begin, gpuPhase& phase){
          phase.phaseMetadata.startTime.tv_nsec,
          phase.semanticIdentifier.c_str(),
          workloadClass,
-         phaseGran);
+         phaseGran,
+         usepolicy);
     }
     else{
-        snprintf(phaseData, sizeof(phaseData),"Event type = END: PhaseId:[%s],Thread Id: %s, parent_id: %d, depth: %d,  Timestamp: %ld s %ld ns, phase type: (%s), workload class: %s, granularity: %s\n",
+        snprintf(phaseData, sizeof(phaseData),"Event type = END: PhaseId:[%s],Thread Id: %s, parent_id: %d, depth: %d,  Timestamp: %ld s %ld ns, phase type: (%s), workload class: %s, granularity: %s  usedPolicy?: %s\n",
          phaseId,
          threadId,
          phase.phaseMetadata.parentId,
@@ -81,7 +87,8 @@ void eventHandler::writeEvent(bool begin, gpuPhase& phase){
          phase.phaseMetadata.endTime.tv_nsec,
          phase.semanticIdentifier.c_str(),
          workloadClass,
-         phaseGran);
+         phaseGran,
+         usepolicy);
     }
 	fputs(phaseData, fptr);
     fclose(fptr);

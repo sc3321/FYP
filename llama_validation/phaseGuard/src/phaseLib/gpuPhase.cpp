@@ -10,7 +10,8 @@
 #include <cerrno>
 #include <atomic>
 #include <threads.h>
-
+#include <thread>
+#include <chrono>
 
 const char* sharedMemName = "/sharedMemName";
 
@@ -84,13 +85,14 @@ granularity getGranularity(const char* granularity) {
     return granularity::UNK;
 }
 
-gpuPhase::gpuPhase(const char* inputSemanticIdentifier,workload_Class priority, granularity granularity){
+gpuPhase::gpuPhase(const char* inputSemanticIdentifier,workload_Class priority, granularity granularity, bool usePolicySupplied){
     semanticIdentifier = inputSemanticIdentifier;
     phaseMetadata.pid = getpid();
+    usePolicy = usePolicySupplied;
     phaseMetadata.depth = 0;
     phaseMetadata.parentId = 0;
     phaseMetadata.tid = gettid();
-    clock_gettime(CLOCK_MONOTONIC_COARSE, &phaseMetadata.startTime);
+    clock_gettime(CLOCK_MONOTONIC, &phaseMetadata.startTime);
     workloadClass = priority;
     workloadGranularity = granularity;
 }
@@ -113,11 +115,14 @@ phaseManager::phaseManager(){
    setPolicyMode();
    policyManagerHandler = ::new (rawBytesPolicy) policyManager(*memoryManager);
 
+   policyManagerHandler->readPolicyData("startup");
+
+   startSamplingIfRequested();
 }
 
 void phaseManager::setPhaseData(gpuPhase& curPhase){
     curPhase.phaseMetadata.phaseId = {curPhase.phaseMetadata.pid, nextPhaseId.fetch_add(1, std::memory_order_relaxed)};
-    clock_gettime(CLOCK_MONOTONIC_COARSE, &curPhase.phaseMetadata.startTime);
+    clock_gettime(CLOCK_MONOTONIC, &curPhase.phaseMetadata.startTime);
 
 }
 
@@ -131,8 +136,8 @@ void phaseManager::updatePhaseTable(gpuPhase& newPhase){
    activePhases.curPhases.insert(activePhases.curPhases.begin(), newPhase);
 }
 
-phaseID phaseManager::phaseBegin(const char* semanticIdentifier, workload_Class priority, granularity granularity){
-    gpuPhase newPhase(semanticIdentifier, priority, granularity);
+phaseID phaseManager::phaseBegin(const char* semanticIdentifier, workload_Class priority, granularity granularity, bool usePolicy){
+    gpuPhase newPhase(semanticIdentifier, priority, granularity, usePolicy);
     policyManagerHandler->applyPolicy(newPhase, currentPolicyMode);
     setPhaseData(newPhase);
     updatePhaseTable(newPhase);
@@ -145,7 +150,7 @@ void phaseManager::phaseEnd(phaseID idToEnd){
     for(size_t i = 0; i < activePhases.curPhases.size(); ++i){
         if(activePhases.curPhases[i].phaseMetadata.phaseId == idToEnd){
           policyManagerHandler->endPDUpdate(activePhases.curPhases[i]);
-          clock_gettime(CLOCK_MONOTONIC_COARSE, &activePhases.curPhases[i].phaseMetadata.endTime);
+          clock_gettime(CLOCK_MONOTONIC, &activePhases.curPhases[i].phaseMetadata.endTime);
           phaseWriter->writeEvent(false, activePhases.curPhases[i]);
           activePhases.curPhases.erase(activePhases.curPhases.begin() + i);
           return;
@@ -154,14 +159,20 @@ void phaseManager::phaseEnd(phaseID idToEnd){
 }
 
 void phaseManager::cleanup(){
+    stopSamplingIfRunning();
+
+    if (policyManagerHandler != nullptr && memoryManager != nullptr && memoryManager->ptrToShm != nullptr) {
+        policyManagerHandler->readPolicyData("shutdown");
+    }
+
     munmap(memoryManager->ptrToShm, sizeof(policyData));
     shm_unlink(sharedMemName);
 }
 
 
-phaseGuard::phaseGuard(phaseManager& curManager, const char* semanticIdentifier, workload_Class wClass, granularity wGran){
+phaseGuard::phaseGuard(phaseManager& curManager, const char* semanticIdentifier, workload_Class wClass, granularity wGran, bool usePolicy){
     ptrToPhaseManager = &curManager;
-    phase_id = ptrToPhaseManager->phaseBegin(semanticIdentifier, wClass, wGran);
+    phase_id = ptrToPhaseManager->phaseBegin(semanticIdentifier, wClass, wGran, usePolicy);
 
 }
 
@@ -171,4 +182,38 @@ phaseGuard::~phaseGuard(){
     }
 }
 
+void phaseManager::startSamplingIfRequested(){
+    const char* sampleEnv = std::getenv("GPU_PHASE_POLICY_SAMPLE_MS");
+    if (sampleEnv == nullptr || sampleEnv[0] == '\0') {
+        return;
+    }
 
+    int sampleMs = std::atoi(sampleEnv);
+    if (sampleMs <= 0) {
+        return;
+    }
+
+    samplingStop.store(false, std::memory_order_release);
+
+    samplingThread = std::thread([this, sampleMs]() {
+        // Sampling labels carry a monotonic timestamp so the time series
+        // can be reconstructed even if records from multiple processes
+        // are interleaved in a shared log file.
+        while (!samplingStop.load(std::memory_order_acquire)) {
+            struct timespec ts;
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+            char label[64];
+            snprintf(label, sizeof(label), "sample_%ld.%09ld",
+                     (long)ts.tv_sec, ts.tv_nsec);
+            policyManagerHandler->readPolicyData(label);
+            std::this_thread::sleep_for(std::chrono::milliseconds(sampleMs));
+        }
+    });
+}
+
+void phaseManager::stopSamplingIfRunning(){
+    samplingStop.store(true, std::memory_order_release);
+    if (samplingThread.joinable()) {
+        samplingThread.join();
+    }
+}

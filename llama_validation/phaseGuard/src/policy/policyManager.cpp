@@ -68,28 +68,53 @@ void policyManager::readPolicyData(const char* where){
 
     auto* s = ptrMemoryManager->ptrToShm;
 
-    std::cerr
-        << "\n[PolicyCounters] " << where << "\n"
-        << "  policyChecks=" << s->policyChecks << "\n"
+    // Capture wall-clock timestamp for time-series alignment.
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
 
-        << "  activeLC=" << s->activeLC << "\n"
-        << "  activeBELong=" << s->activeBELong << "\n"
-        << "  activeBEChunked=" << s->activeBEChunked << "\n"
+    // Build the record once; write to file if configured, else stderr.
+    char header[256];
+    snprintf(header, sizeof(header),
+        "\n[PolicyCounters] pid=%d ts=%ld.%09ld where=%s\n",
+        (int)getpid(), (long)ts.tv_sec, ts.tv_nsec, where);
 
-        << "  beLongSawLCActive=" << s->beLongSawLCActive << "\n"
+    const char* logPath = std::getenv("GPU_PHASE_POLICY_LOG");
+    FILE* out = nullptr;
+    bool ownsFile = false;
 
-        << "  BEImmAdmit=" << s->BEImmAdmit << "\n"
-        << "  BEDelayAdmit=" << s->BEDelayAdmit << "\n"
-        << "  BEThrottleCount=" << s->BEThrottleCount << "\n"
-        << "  BEWaitus=" << s->BEWaitus << "\n"
+    if (logPath != nullptr && logPath[0] != '\0') {
+        // Append mode so multiple processes can share one file; each line
+        // self-identifies via pid and timestamp.
+        out = std::fopen(logPath, "a");
+        if (out != nullptr) {
+            ownsFile = true;
+        }
+    }
 
-        << "  BELongImmAdmit=" << s->BELongImmAdmit << "\n"
-        << "  BELongDelayAdmit=" << s->BELongDelayAdmit << "\n"
-        << "  BELongThrottleCount=" << s->BELongThrottleCount << "\n"
-        << "  BELongWaitus=" << s->BELongWaitus << "\n"
+    if (out == nullptr) {
+        out = stderr;
+    }
 
-        << "  configured_delay_us=" << delay << "\n"
-        << std::endl;
+    std::fprintf(out, "%s", header);
+    std::fprintf(out, "  policyChecks=%d\n", s->policyChecks);
+    std::fprintf(out, "  activeLC=%d\n", s->activeLC);
+    std::fprintf(out, "  activeBELong=%d\n", s->activeBELong);
+    std::fprintf(out, "  activeBEChunked=%d\n", s->activeBEChunked);
+    std::fprintf(out, "  beLongSawLCActive=%d\n", s->beLongSawLCActive);
+    std::fprintf(out, "  BEImmAdmit=%d\n", s->BEImmAdmit);
+    std::fprintf(out, "  BEDelayAdmit=%ld\n", s->BEDelayAdmit);
+    std::fprintf(out, "  BEThrottleCount=%d\n", s->BEThrottleCount);
+    std::fprintf(out, "  BEWaitus=%lld\n", s->BEWaitus);
+    std::fprintf(out, "  BELongImmAdmit=%d\n", s->BELongImmAdmit);
+    std::fprintf(out, "  BELongDelayAdmit=%ld\n", s->BELongDelayAdmit);
+    std::fprintf(out, "  BELongThrottleCount=%d\n", s->BELongThrottleCount);
+    std::fprintf(out, "  BELongWaitus=%lld\n", s->BELongWaitus);
+    std::fprintf(out, "  configured_delay_us=%lu\n", (unsigned long)delay);
+    std::fflush(out);
+
+    if (ownsFile) {
+        std::fclose(out);
+    }
 }
 
 bool policyManager::naivePolicy(gpuPhase& curPhase, bool& tried){
@@ -154,6 +179,13 @@ void policyManager::applyPolicy(gpuPhase& curPhase, policyMode policy){
     robustLockGuard lock(ptrMemoryManager->ptrToShm->writeAllowed);
     ptrMemoryManager->ptrToShm->policyChecks++;
     }
+
+    if(!curPhase.getPolicyInformation()){
+        robustLockGuard lock(ptrMemoryManager->ptrToShm->writeAllowed);
+        beginPDUpdate(curPhase);
+        return;
+    }
+
     if(policy == policyMode::NONE){
         robustLockGuard lock(ptrMemoryManager->ptrToShm->writeAllowed);
         beginPDUpdate(curPhase);

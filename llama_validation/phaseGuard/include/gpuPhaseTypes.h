@@ -11,6 +11,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <utility>
+#include <thread>
 #include "memManager.h"
 #include "policyManager.h"
 
@@ -42,13 +43,15 @@ typedef struct {
 
 class gpuPhase{
     public:
-        gpuPhase(const char* semanticIdentifier,workload_Class priority,granularity granularity);
+        gpuPhase(const char* semanticIdentifier,workload_Class priority,granularity granularity, bool usePolicy);
         ~gpuPhase() = default;
         workload_Class workloadClass;
         std::string semanticIdentifier;
         granularity workloadGranularity;
         metadata phaseMetadata;
+        bool getPolicyInformation() const {return usePolicy; }
     private:
+        bool usePolicy;
 };
 
 struct active_Phases{
@@ -59,7 +62,7 @@ class phaseManager{
     public:
         phaseManager();
         ~phaseManager() = default;
-        phaseID phaseBegin(const char* semanticIdentifier,workload_Class priority, granularity granularity);
+        phaseID phaseBegin(const char* semanticIdentifier,workload_Class priority, granularity granularity, bool usePolicy = true);
         void phaseEnd(phaseID);
         void setPhaseData(gpuPhase& gpuPhase);
         void updatePhaseTable(gpuPhase& newPhase);
@@ -72,13 +75,17 @@ class phaseManager{
         void setPolicyMode();
     private:
         policyMode currentPolicyMode = policyMode::NONE;
-
+        // Diagnostic sampling thread; only active if GPU_PHASE_POLICY_SAMPLE_MS is set.
+        std::thread samplingThread;
+        std::atomic<bool> samplingStop{false};
+        void startSamplingIfRequested();
+        void stopSamplingIfRunning();
 };
 
 // use this for short lived phases.
 class phaseGuard {
     public:
-        phaseGuard(phaseManager& phase_Manager, const char* semanticIdentifier, workload_Class wClass, granularity wGran);
+        phaseGuard(phaseManager& phase_Manager, const char* semanticIdentifier, workload_Class wClass, granularity wGran, bool usePolicy);
 
         ~phaseGuard();
     private:

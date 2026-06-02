@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/vol/bitbucket/sc3321/FYP/llama_validation"
+ROOT="/home/sc3321/FYP/llama_validation"
 SERVER="${ROOT}/llama.cpp/build/bin/llama-server"
 MODEL="${ROOT}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf"
 
@@ -139,6 +139,7 @@ start_lc_server() {
 
   echo "Starting LC server: log_dir=$log_dir POLICY_MODE=$policy"
 
+  CUDA_VISIBLE_DEVICES=0 \
   GPU_PHASE_SHM_NAME="$SHM_NAME" \
   GPU_PHASE_LOG_DIR="$log_dir" \
   POLICY_MODE="$policy" \
@@ -168,6 +169,7 @@ start_be_server() {
 
   echo "Starting BE server: log_dir=$log_dir POLICY_MODE=$policy granularity=$gran"
 
+  CUDA_VISIBLE_DEVICES=0 \
   GPU_PHASE_SHM_NAME="$SHM_NAME" \
   GPU_PHASE_LOG_DIR="$log_dir" \
   POLICY_MODE="$policy" \

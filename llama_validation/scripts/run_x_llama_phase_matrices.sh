@@ -13,7 +13,7 @@ set -euo pipefail
 # should be cleared by the warmup phase before measured requests begin.
 # ==============================================================================
 
-ROOT="/vol/bitbucket/sc3321/FYP/llama_validation"
+ROOT="/home/sc3321/FYP/llama_validation"
 RUNNER="${ROOT}/scripts/run_llama_phase_matrix.sh"
 ANALYSER="${ROOT}/scripts/analyse_llama_phase_matrix.py"
 

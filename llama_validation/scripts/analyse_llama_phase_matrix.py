@@ -156,7 +156,41 @@ def overlap_ms(a, b):
     return max(0, end - start) / 1_000_000.0
 
 def total_overlap(left, right):
-    return sum(overlap_ms(a, b) for a in left for b in right)
+    """
+    Compute total pairwise interval overlap in milliseconds.
+
+    Old version was O(len(left) * len(right)).
+    This version is near-linear after sorting.
+    """
+    if not left or not right:
+        return 0.0
+
+    left = sorted(left, key=lambda x: x["start_ns"])
+    right = sorted(right, key=lambda x: x["start_ns"])
+
+    total_ns = 0
+    j = 0
+
+    for a in left:
+        a_start = a["start_ns"]
+        a_end = a["end_ns"]
+
+        # Skip right intervals that end before this left interval starts.
+        while j < len(right) and right[j]["end_ns"] <= a_start:
+            j += 1
+
+        k = j
+
+        # Only scan right intervals that start before this left interval ends.
+        while k < len(right) and right[k]["start_ns"] < a_end:
+            b = right[k]
+            start = max(a_start, b["start_ns"])
+            end = min(a_end, b["end_ns"])
+            if end > start:
+                total_ns += end - start
+            k += 1
+
+    return total_ns / 1_000_000.0
 
 def parse_client(path):
     vals = []

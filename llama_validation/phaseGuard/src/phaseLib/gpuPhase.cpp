@@ -13,21 +13,35 @@
 #include <thread>
 #include <chrono>
 
-const char* sharedMemName = "/sharedMemName";
+static const char* getShmName() {
+    const char* n = std::getenv("GPU_PHASE_SHM_NAME");
+    return (n && n[0]) ? n : "/sharedMemName";
+}
 
 using phase_id_t = uint64_t;
 static std::atomic<uint64_t> nextPhaseId{1};
 
+static std::string upper_string(std::string s) {
+    for(char &c : s){
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    }
+    return s;
+}
+
 static policyMode parse_policy_mode(const std::string& policy) {
-    if (policy == "none") {
+
+    std::string p = upper_string(policy);
+
+
+    if (p == "NONE") {
         return policyMode::NONE;
     }
 
-    if (policy == "naive") {
+    if (p == "NAIVE") {
         return policyMode::NAIVE_THROTTLE;
     }
 
-    if (policy == "proper" || policy == "cap") {
+    if (p == "PROPER" || p == "CAP") {
         return policyMode::CAP;
     }
 
@@ -47,7 +61,7 @@ static policyMode readEnvPolicyMode(const char* name, policyMode defaultValue){
 
 
 void phaseManager::setPolicyMode(){
-    currentPolicyMode = readEnvPolicyMode("POLICY_MODE", policyMode::CAP);
+    currentPolicyMode = readEnvPolicyMode("POLICY_MODE", policyMode::NONE);
 }
 
 workload_Class getPriority(const char* priority) {
@@ -107,7 +121,7 @@ phaseManager::phaseManager(){
    if(rawBytes == nullptr){
         throw "Could not allocate raw bytes for memoryManager";
    }
-   memoryManager = ::new (rawBytes) memManager(sharedMemName);
+   memoryManager = ::new (rawBytes) memManager(getShmName());
    void* rawBytesPolicy   = (policyManager*)std::malloc(sizeof(policyManager));
    if(rawBytesPolicy == nullptr){
         throw "Could not allocate raw bytes for policyManager";
@@ -166,7 +180,7 @@ void phaseManager::cleanup(){
     }
 
     munmap(memoryManager->ptrToShm, sizeof(policyData));
-    shm_unlink(sharedMemName);
+    shm_unlink(getShmName());
 }
 
 

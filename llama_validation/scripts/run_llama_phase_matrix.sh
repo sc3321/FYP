@@ -10,10 +10,13 @@ OUT_ROOT="${ROOT}/runs/llama_phase_matrix_$(date +%Y%m%d_%H%M%S)"
 LC_PORT=8080
 BE_PORT=8081
 
+# Usage:
+#   ./script.sh all          # old matrix + new continuous-LC cases
+#   ./script.sh base         # old matrix only
+#   ./script.sh continuous   # new continuous-LC cases only
+RUN_SET="${1:-all}"
+
 # Increased request counts for statistically meaningful tail percentiles.
-# With N_LC=50, p95 is the avg of obs 47-50; p99 is obs 50 (still limited but
-# meaningful). Previous N_LC=10 made p99 == p95 (both were max), which is
-# percentile-resolution-degenerate.
 N_LC=50
 N_BE_LONG=25
 N_BE_SHORT=50
@@ -21,31 +24,49 @@ N_BE_SHORT=50
 N_LC_LONG=30
 N_BE_LONG_TRIGGER=15
 
-# Warmup: throwaway requests issued before timed measurement begins, to clear
-# cold-start artefacts (model load, CUDA context creation, JIT compilation,
-# KV cache prefix population, driver state stabilisation). Discarded entirely
-# from results.
+# Warmup: throwaway requests issued before timed measurement begins.
 N_WARMUP_LC=3
 N_WARMUP_BE=2
 
-SHM_NAME="/gpuphase_gpu0"
+SHM_NAME="/sharedMemName"
 BE_DELAY_US=5000
 MAX_DELAY_LOOPS=100000
+
+# Diagnostic policy counter sampling. This gives each case its own
+# policy_counters.log, useful for checking activeLC / BE admission behaviour.
+POLICY_SAMPLE_MS=1000
 
 # Change this to 20/40 if you hit CUDA OOM with two servers.
 N_GPU_LAYERS=99
 
+# New continuous-LC experiment controls.
+# LC_CONCURRENCY controls how many LC client requests are kept in flight.
+# LC_SERVER_PARALLEL controls llama-server slots for the LC server.
+# For the continuous experiment, LC starts first, then BE-long starts shortly
+# after, so activeLC should already be >0 when BE admission decisions happen.
+LC_CONCURRENCY=4
+LC_SERVER_PARALLEL=4
+BE_SERVER_PARALLEL=1
+LC_BE_LAUNCH_GAP_SEC=0.20
+
 mkdir -p "$OUT_ROOT"
 
-echo "Output directory: $OUT_ROOT"
-echo "Server:           $SERVER"
-echo "Model:            $MODEL"
-echo "GPU layers:       $N_GPU_LAYERS"
-echo "N_LC:             $N_LC (warmup: $N_WARMUP_LC)"
-echo "N_BE_LONG:        $N_BE_LONG (warmup: $N_WARMUP_BE)"
-echo "N_BE_SHORT:       $N_BE_SHORT (warmup: $N_WARMUP_BE)"
-echo "N_LC_LONG:        $N_LC_LONG"
-echo "N_BE_LONG_TRIGGER:$N_BE_LONG_TRIGGER"
+echo "Output directory:      $OUT_ROOT"
+echo "Server:                $SERVER"
+echo "Model:                 $MODEL"
+echo "Run set:               $RUN_SET"
+echo "GPU layers:            $N_GPU_LAYERS"
+echo "N_LC:                  $N_LC (warmup: $N_WARMUP_LC)"
+echo "N_BE_LONG:             $N_BE_LONG (warmup: $N_WARMUP_BE)"
+echo "N_BE_SHORT:            $N_BE_SHORT (warmup: $N_WARMUP_BE)"
+echo "N_LC_LONG:             $N_LC_LONG"
+echo "N_BE_LONG_TRIGGER:     $N_BE_LONG_TRIGGER"
+echo "BE_DELAY_US:           $BE_DELAY_US"
+echo "POLICY_SAMPLE_MS:      $POLICY_SAMPLE_MS"
+echo "LC_CONCURRENCY:        $LC_CONCURRENCY"
+echo "LC_SERVER_PARALLEL:    $LC_SERVER_PARALLEL"
+echo "BE_SERVER_PARALLEL:    $BE_SERVER_PARALLEL"
+echo "LC_BE_LAUNCH_GAP_SEC:  $LC_BE_LAUNCH_GAP_SEC"
 
 if [[ ! -x "$SERVER" ]]; then
   echo "ERROR: llama-server not executable at $SERVER" >&2
@@ -78,16 +99,19 @@ cleanup_servers() {
 kill_stale_servers() {
   cleanup_servers
   pkill -u "$USER" -f "llama-server" 2>/dev/null || true
+
   if command -v fuser >/dev/null 2>&1; then
     fuser -k "${LC_PORT}/tcp" 2>/dev/null || true
     fuser -k "${BE_PORT}/tcp" 2>/dev/null || true
   fi
+
   sleep 1
 }
 
 reset_shared_memory() {
   kill_stale_servers
   rm -f /dev/shm/gpuphase_gpu0 2>/dev/null || true
+  rm -f /dev/shm/sharedMemName 2>/dev/null || true
 }
 
 trap cleanup_servers EXIT
@@ -134,14 +158,21 @@ wait_for_server() {
 start_lc_server() {
   local log_dir="$1"
   local policy="$2"
+  local np="${3:-1}"
 
   mkdir -p "$log_dir"
 
-  echo "Starting LC server: log_dir=$log_dir POLICY_MODE=$policy"
+  local case_dir
+  case_dir="$(dirname "$log_dir")"
+  local policy_log="${case_dir}/policy_counters.log"
+
+  echo "Starting LC server: log_dir=$log_dir POLICY_MODE=$policy np=$np"
 
   CUDA_VISIBLE_DEVICES=0 \
   GPU_PHASE_SHM_NAME="$SHM_NAME" \
   GPU_PHASE_LOG_DIR="$log_dir" \
+  GPU_PHASE_POLICY_LOG="$policy_log" \
+  GPU_PHASE_POLICY_SAMPLE_MS="$POLICY_SAMPLE_MS" \
   POLICY_MODE="$policy" \
   BE_DELAY_US="$BE_DELAY_US" \
   GPU_PHASE_MAX_DELAY_LOOPS="$MAX_DELAY_LOOPS" \
@@ -152,7 +183,7 @@ start_lc_server() {
     --host 127.0.0.1 \
     --port "$LC_PORT" \
     -ngl "$N_GPU_LAYERS" \
-    -np 1 \
+    -np "$np" \
     > "${log_dir}/server_stdout.log" \
     2> "${log_dir}/server_stderr.log" &
 
@@ -164,14 +195,21 @@ start_be_server() {
   local log_dir="$1"
   local policy="$2"
   local gran="$3"
+  local np="${4:-1}"
 
   mkdir -p "$log_dir"
 
-  echo "Starting BE server: log_dir=$log_dir POLICY_MODE=$policy granularity=$gran"
+  local case_dir
+  case_dir="$(dirname "$log_dir")"
+  local policy_log="${case_dir}/policy_counters.log"
+
+  echo "Starting BE server: log_dir=$log_dir POLICY_MODE=$policy granularity=$gran np=$np"
 
   CUDA_VISIBLE_DEVICES=0 \
   GPU_PHASE_SHM_NAME="$SHM_NAME" \
   GPU_PHASE_LOG_DIR="$log_dir" \
+  GPU_PHASE_POLICY_LOG="$policy_log" \
+  GPU_PHASE_POLICY_SAMPLE_MS="$POLICY_SAMPLE_MS" \
   POLICY_MODE="$policy" \
   BE_DELAY_US="$BE_DELAY_US" \
   GPU_PHASE_MAX_DELAY_LOOPS="$MAX_DELAY_LOOPS" \
@@ -182,7 +220,7 @@ start_be_server() {
     --host 127.0.0.1 \
     --port "$BE_PORT" \
     -ngl "$N_GPU_LAYERS" \
-    -np 1 \
+    -np "$np" \
     > "${log_dir}/server_stdout.log" \
     2> "${log_dir}/server_stderr.log" &
 
@@ -268,9 +306,6 @@ validate_response() {
   fi
 }
 
-# Warmup: issue throwaway requests that are NOT logged to client jsonl, and
-# whose responses are discarded. This clears cold-start artefacts before timed
-# measurement begins.
 warmup_client() {
   local port="$1"
   local n="$2"
@@ -333,17 +368,105 @@ run_client() {
   done
 }
 
+run_client_concurrent() {
+  local port="$1"
+  local kind="$2"
+  local n="$3"
+  local out="$4"
+  local concurrency="$5"
+
+  if [[ "$concurrency" -le 1 ]]; then
+    run_client "$port" "$kind" "$n" "$out"
+    return 0
+  fi
+
+  local out_dir
+  out_dir="$(dirname "$out")"
+
+  local resp_dir="${out_dir}/responses_${kind}"
+  local tmp_dir="${out_dir}/tmp_${kind}_jsonl"
+
+  mkdir -p "$out_dir" "$resp_dir"
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir"
+  : > "$out"
+
+  echo "Running concurrent client: kind=$kind port=$port n=$n concurrency=$concurrency"
+
+  local running=0
+  local failed=0
+
+  for i in $(seq 1 "$n"); do
+    (
+      local start_ns
+      local end_ns
+      local latency_ms
+      local response_file
+      local line_file
+
+      response_file="${resp_dir}/${kind}_${i}.json"
+      line_file="${tmp_dir}/$(printf "%06d" "$i").jsonl"
+
+      start_ns=$(date +%s%N)
+
+      if ! request_payload "$kind" | curl -fsS "http://127.0.0.1:${port}/completion" \
+        -H "Content-Type: application/json" \
+        -d @- > "$response_file"; then
+        echo "ERROR: curl failed for kind=$kind port=$port request=$i" >&2
+        exit 1
+      fi
+
+      end_ns=$(date +%s%N)
+      latency_ms=$(( (end_ns - start_ns) / 1000000 ))
+
+      validate_response "$response_file" "$kind" "$port" "$i"
+
+      printf '{"i":%d,"kind":"%s","port":%d,"latency_ms":%d,"start_ns":%s,"end_ns":%s,"response_file":"%s","client_concurrency":%d}\n' \
+        "$i" "$kind" "$port" "$latency_ms" "$start_ns" "$end_ns" "$response_file" "$concurrency" > "$line_file"
+    ) &
+
+    running=$((running + 1))
+
+    if [[ "$running" -ge "$concurrency" ]]; then
+      if ! wait -n; then
+        failed=1
+      fi
+      running=$((running - 1))
+    fi
+  done
+
+  while [[ "$running" -gt 0 ]]; do
+    if ! wait -n; then
+      failed=1
+    fi
+    running=$((running - 1))
+  done
+
+  if [[ "$failed" -ne 0 ]]; then
+    echo "ERROR: one or more concurrent client requests failed for kind=$kind port=$port" >&2
+    exit 1
+  fi
+
+  find "$tmp_dir" -type f -name '*.jsonl' | sort | xargs cat > "$out"
+  rm -rf "$tmp_dir"
+}
+
 save_config() {
   local case_dir="$1"
   local case_name="$2"
   local policy="$3"
   local be_gran="${4:-none}"
   local ordering="${5:-default}"
+  local lc_np="${6:-1}"
+  local be_np="${7:-1}"
+  local lc_conc="${8:-1}"
+  local be_conc="${9:-1}"
 
   cat > "${case_dir}/config.txt" <<CONFIG
 case=${case_name}
 model=${MODEL}
 server=${SERVER}
+run_set=${RUN_SET}
 lc_port=${LC_PORT}
 be_port=${BE_PORT}
 policy=${policy}
@@ -359,16 +482,15 @@ n_warmup_be=${N_WARMUP_BE}
 shm_name=${SHM_NAME}
 be_delay_us=${BE_DELAY_US}
 max_delay_loops=${MAX_DELAY_LOOPS}
+policy_sample_ms=${POLICY_SAMPLE_MS}
 ngl=${N_GPU_LAYERS}
-np=1
+lc_server_np=${lc_np}
+be_server_np=${be_np}
+lc_client_concurrency=${lc_conc}
+be_client_concurrency=${be_conc}
 CONFIG
 }
 
-# Event-count thresholds are calculated as the minimum expected number of
-# BEGIN+END phase events for the timed (non-warmup) portion of the case.
-# llama-server emits one LLAMA_REQUEST phase (BEGIN+END = 2 events) plus
-# many LLAMA_DECODE phases per request. The threshold uses only LLAMA_REQUEST
-# events: 2 events per request. We are deliberately conservative.
 check_case_events() {
   local case_dir="$1"
   local expected_min="$2"
@@ -386,7 +508,7 @@ check_case_events() {
 }
 
 # ------------------------------------------------------------------------------
-# Cases
+# Original cases
 # ------------------------------------------------------------------------------
 
 run_case_lc_alone() {
@@ -395,14 +517,12 @@ run_case_lc_alone() {
 
   echo "===== CASE A: LC alone, no policy ====="
   reset_shared_memory
-  save_config "$case_dir" "lc_alone_none" "NONE" "none" "single"
+  save_config "$case_dir" "lc_alone_none" "NONE" "none" "single" 1 1 1 1
 
-  start_lc_server "${case_dir}/lc_events" "NONE"
+  start_lc_server "${case_dir}/lc_events" "NONE" 1
   warmup_client "$LC_PORT" "$N_WARMUP_LC" "LC"
   run_client "$LC_PORT" "lc" "$N_LC" "${case_dir}/lc_client.jsonl"
 
-  # 2 events per LC request, plus warmup events (warmup also produces events
-  # but we set the threshold using only the timed portion conservatively).
   check_case_events "$case_dir" "$(( 2 * N_LC ))"
   cleanup_servers
 }
@@ -413,9 +533,9 @@ run_case_be_long_alone() {
 
   echo "===== CASE B: BE-long alone, no policy ====="
   reset_shared_memory
-  save_config "$case_dir" "be_long_alone_none" "NONE" "LONG" "single"
+  save_config "$case_dir" "be_long_alone_none" "NONE" "LONG" "single" 1 1 1 1
 
-  start_be_server "${case_dir}/be_events" "NONE" "LONG"
+  start_be_server "${case_dir}/be_events" "NONE" "LONG" 1
   warmup_client "$BE_PORT" "$N_WARMUP_BE" "BE"
   run_client "$BE_PORT" "be_long" "$N_BE_LONG" "${case_dir}/be_client.jsonl"
 
@@ -429,12 +549,11 @@ run_case_lc_be_long_none_be_first() {
 
   echo "===== CASE C: LC + BE-long, no policy, BE-first ====="
   reset_shared_memory
-  save_config "$case_dir" "lc_be_long_none" "NONE" "LONG" "be_first"
+  save_config "$case_dir" "lc_be_long_none" "NONE" "LONG" "be_first" 1 1 1 1
 
-  start_lc_server "${case_dir}/lc_events" "NONE"
-  start_be_server "${case_dir}/be_events" "NONE" "LONG"
+  start_lc_server "${case_dir}/lc_events" "NONE" 1
+  start_be_server "${case_dir}/be_events" "NONE" "LONG" 1
 
-  # Warm up both servers BEFORE the timed parallel run.
   warmup_client "$LC_PORT" "$N_WARMUP_LC" "LC"
   warmup_client "$BE_PORT" "$N_WARMUP_BE" "BE"
 
@@ -459,10 +578,10 @@ run_case_lc_be_long_policy_be_first() {
 
   echo "===== CASE D: LC + BE-long, CAP policy, BE-first ====="
   reset_shared_memory
-  save_config "$case_dir" "lc_be_long_policy" "CAP" "LONG" "be_first"
+  save_config "$case_dir" "lc_be_long_policy" "CAP" "LONG" "be_first" 1 1 1 1
 
-  start_lc_server "${case_dir}/lc_events" "CAP"
-  start_be_server "${case_dir}/be_events" "CAP" "LONG"
+  start_lc_server "${case_dir}/lc_events" "CAP" 1
+  start_be_server "${case_dir}/be_events" "CAP" "LONG" 1
 
   warmup_client "$LC_PORT" "$N_WARMUP_LC" "LC"
   warmup_client "$BE_PORT" "$N_WARMUP_BE" "BE"
@@ -488,10 +607,10 @@ run_case_lc_be_short_none() {
 
   echo "===== CASE E: LC + BE-short, no policy ====="
   reset_shared_memory
-  save_config "$case_dir" "lc_be_short_none" "NONE" "SHORT" "be_first"
+  save_config "$case_dir" "lc_be_short_none" "NONE" "SHORT" "be_first" 1 1 1 1
 
-  start_lc_server "${case_dir}/lc_events" "NONE"
-  start_be_server "${case_dir}/be_events" "NONE" "SHORT"
+  start_lc_server "${case_dir}/lc_events" "NONE" 1
+  start_be_server "${case_dir}/be_events" "NONE" "SHORT" 1
 
   warmup_client "$LC_PORT" "$N_WARMUP_LC" "LC"
   warmup_client "$BE_PORT" "$N_WARMUP_BE" "BE"
@@ -517,10 +636,10 @@ run_case_lc_be_short_policy() {
 
   echo "===== CASE F: LC + BE-short, CAP policy ====="
   reset_shared_memory
-  save_config "$case_dir" "lc_be_short_policy" "CAP" "SHORT" "be_first"
+  save_config "$case_dir" "lc_be_short_policy" "CAP" "SHORT" "be_first" 1 1 1 1
 
-  start_lc_server "${case_dir}/lc_events" "CAP"
-  start_be_server "${case_dir}/be_events" "CAP" "SHORT"
+  start_lc_server "${case_dir}/lc_events" "CAP" 1
+  start_be_server "${case_dir}/be_events" "CAP" "SHORT" 1
 
   warmup_client "$LC_PORT" "$N_WARMUP_LC" "LC"
   warmup_client "$BE_PORT" "$N_WARMUP_BE" "BE"
@@ -546,10 +665,10 @@ run_case_lc_first_be_long_none() {
 
   echo "===== CASE G: LC-first + BE-long, no policy ====="
   reset_shared_memory
-  save_config "$case_dir" "lc_first_be_long_none" "NONE" "LONG" "lc_first"
+  save_config "$case_dir" "lc_first_be_long_none" "NONE" "LONG" "lc_first" 1 1 1 1
 
-  start_lc_server "${case_dir}/lc_events" "NONE"
-  start_be_server "${case_dir}/be_events" "NONE" "LONG"
+  start_lc_server "${case_dir}/lc_events" "NONE" 1
+  start_be_server "${case_dir}/be_events" "NONE" "LONG" 1
 
   warmup_client "$LC_PORT" "$N_WARMUP_LC" "LC"
   warmup_client "$BE_PORT" "$N_WARMUP_BE" "BE"
@@ -575,10 +694,10 @@ run_case_lc_first_be_long_policy() {
 
   echo "===== CASE H: LC-first + BE-long, CAP policy ====="
   reset_shared_memory
-  save_config "$case_dir" "lc_first_be_long_policy" "CAP" "LONG" "lc_first"
+  save_config "$case_dir" "lc_first_be_long_policy" "CAP" "LONG" "lc_first" 1 1 1 1
 
-  start_lc_server "${case_dir}/lc_events" "CAP"
-  start_be_server "${case_dir}/be_events" "CAP" "LONG"
+  start_lc_server "${case_dir}/lc_events" "CAP" 1
+  start_be_server "${case_dir}/be_events" "CAP" "LONG" 1
 
   warmup_client "$LC_PORT" "$N_WARMUP_LC" "LC"
   warmup_client "$BE_PORT" "$N_WARMUP_BE" "BE"
@@ -598,14 +717,121 @@ run_case_lc_first_be_long_policy() {
   cleanup_servers
 }
 
-run_case_lc_alone
-run_case_be_long_alone
-run_case_lc_be_long_none_be_first
-run_case_lc_be_long_policy_be_first
-run_case_lc_be_short_none
-run_case_lc_be_short_policy
-run_case_lc_first_be_long_none
-run_case_lc_first_be_long_policy
+# ------------------------------------------------------------------------------
+# New continuous-LC cases
+# ------------------------------------------------------------------------------
 
-echo "All runs complete."
+run_case_lc_cont_alone_none() {
+  local case_dir="${OUT_ROOT}/caseI_lc_cont_alone_none"
+  mkdir -p "$case_dir"
+
+  echo "===== CASE I: continuous LC alone, no policy ====="
+  reset_shared_memory
+  save_config "$case_dir" "lc_cont_alone_none" "NONE" "none" "continuous_lc_alone" \
+    "$LC_SERVER_PARALLEL" 1 "$LC_CONCURRENCY" 1
+
+  start_lc_server "${case_dir}/lc_events" "NONE" "$LC_SERVER_PARALLEL"
+  warmup_client "$LC_PORT" "$N_WARMUP_LC" "LC"
+
+  run_client_concurrent "$LC_PORT" "lc" "$N_LC" "${case_dir}/lc_client.jsonl" "$LC_CONCURRENCY"
+
+  check_case_events "$case_dir" "$(( 2 * N_LC ))"
+  cleanup_servers
+}
+
+run_case_lc_cont_be_long_none() {
+  local case_dir="${OUT_ROOT}/caseJ_lc_cont_be_long_none"
+  mkdir -p "$case_dir"
+
+  echo "===== CASE J: continuous LC + BE-long, no policy, LC-pool-first ====="
+  reset_shared_memory
+  save_config "$case_dir" "lc_cont_be_long_none" "NONE" "LONG" "lc_pool_first" \
+    "$LC_SERVER_PARALLEL" "$BE_SERVER_PARALLEL" "$LC_CONCURRENCY" 1
+
+  start_lc_server "${case_dir}/lc_events" "NONE" "$LC_SERVER_PARALLEL"
+  start_be_server "${case_dir}/be_events" "NONE" "LONG" "$BE_SERVER_PARALLEL"
+
+  warmup_client "$LC_PORT" "$N_WARMUP_LC" "LC"
+  warmup_client "$BE_PORT" "$N_WARMUP_BE" "BE"
+
+  run_client_concurrent "$LC_PORT" "lc" "$N_LC" "${case_dir}/lc_client.jsonl" "$LC_CONCURRENCY" &
+  local c_lc=$!
+
+  sleep "$LC_BE_LAUNCH_GAP_SEC"
+
+  run_client "$BE_PORT" "be_long" "$N_BE_LONG" "${case_dir}/be_client.jsonl" &
+  local c_be=$!
+
+  wait "$c_lc"
+  wait "$c_be"
+
+  check_case_events "$case_dir" "$(( 2 * (N_LC + N_BE_LONG) ))"
+  cleanup_servers
+}
+
+run_case_lc_cont_be_long_policy() {
+  local case_dir="${OUT_ROOT}/caseK_lc_cont_be_long_policy"
+  mkdir -p "$case_dir"
+
+  echo "===== CASE K: continuous LC + BE-long, CAP policy, LC-pool-first ====="
+  reset_shared_memory
+  save_config "$case_dir" "lc_cont_be_long_policy" "CAP" "LONG" "lc_pool_first" \
+    "$LC_SERVER_PARALLEL" "$BE_SERVER_PARALLEL" "$LC_CONCURRENCY" 1
+
+  start_lc_server "${case_dir}/lc_events" "CAP" "$LC_SERVER_PARALLEL"
+  start_be_server "${case_dir}/be_events" "CAP" "LONG" "$BE_SERVER_PARALLEL"
+
+  warmup_client "$LC_PORT" "$N_WARMUP_LC" "LC"
+  warmup_client "$BE_PORT" "$N_WARMUP_BE" "BE"
+
+  run_client_concurrent "$LC_PORT" "lc" "$N_LC" "${case_dir}/lc_client.jsonl" "$LC_CONCURRENCY" &
+  local c_lc=$!
+
+  sleep "$LC_BE_LAUNCH_GAP_SEC"
+
+  run_client "$BE_PORT" "be_long" "$N_BE_LONG" "${case_dir}/be_client.jsonl" &
+  local c_be=$!
+
+  wait "$c_lc"
+  wait "$c_be"
+
+  check_case_events "$case_dir" "$(( 2 * (N_LC + N_BE_LONG) ))"
+  cleanup_servers
+}
+
+run_base_cases() {
+  run_case_lc_alone
+  run_case_be_long_alone
+  run_case_lc_be_long_none_be_first
+  run_case_lc_be_long_policy_be_first
+  run_case_lc_be_short_none
+  run_case_lc_be_short_policy
+  run_case_lc_first_be_long_none
+  run_case_lc_first_be_long_policy
+}
+
+run_continuous_cases() {
+  run_case_lc_cont_alone_none
+  run_case_lc_cont_be_long_none
+  run_case_lc_cont_be_long_policy
+}
+
+case "$RUN_SET" in
+  all)
+    run_base_cases
+    run_continuous_cases
+    ;;
+  base)
+    run_base_cases
+    ;;
+  continuous)
+    run_continuous_cases
+    ;;
+  *)
+    echo "ERROR: unknown RUN_SET '$RUN_SET'. Use: all, base, or continuous." >&2
+    exit 1
+    ;;
+esac
+
+echo "All requested runs complete."
 echo "Results in: $OUT_ROOT"

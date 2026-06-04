@@ -19,7 +19,7 @@ robustLockGuard::robustLockGuard(pthread_mutex_t& mutex){
 }
 
 memManager::memManager(const char* name){
-    
+
     bool creator = false;
     shm_fd = shm_open(name, O_CREAT | O_EXCL | O_RDWR, 0666);
     if(shm_fd >= 0){
@@ -38,10 +38,10 @@ memManager::memManager(const char* name){
     if(creator){
         ftruncate(shm_fd, sizeof(policyData));
     }
-    ptrToShm = static_cast<policyData*>(mmap(0, sizeof(policyData), PROT_WRITE, MAP_SHARED, shm_fd, 0));
+    ptrToShm = static_cast<policyData*>(mmap(0, sizeof(policyData), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0));
 
     if(creator){
-       
+
        pthread_mutexattr_t attr;
        pthread_mutexattr_init(&attr);
        pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
@@ -49,8 +49,8 @@ memManager::memManager(const char* name){
        pthread_mutex_init(&(ptrToShm->writeAllowed), &attr);
        pthread_mutexattr_destroy(&attr);
 
-       ptrToShm->activeBELong          = 0;       
-       ptrToShm->activeLC              = 0;           
+       ptrToShm->activeBELong          = 0;
+       ptrToShm->activeLC              = 0;
        ptrToShm->activeBEChunked       = 0;
 
        ptrToShm->BEImmAdmit            = 0;
@@ -58,11 +58,11 @@ memManager::memManager(const char* name){
        ptrToShm->BEWaitus              = 0;
        ptrToShm->BEThrottleCount       = 0;
        ptrToShm->beLongSawLCActive     = 0;
-       ptrToShm->BELongImmAdmit        = 0; 
-       ptrToShm->BELongDelayAdmit      = 0; 
-       ptrToShm->BELongWaitus          = 0; 
-       ptrToShm->BELongThrottleCount   = 0; 
-       
+       ptrToShm->BELongImmAdmit        = 0;
+       ptrToShm->BELongDelayAdmit      = 0;
+       ptrToShm->BELongWaitus          = 0;
+       ptrToShm->BELongThrottleCount   = 0;
+
        ptrToShm->isInitialized.store(true, std::memory_order_release);
        std::cout << "Process [" << getpid() << "] initialised the policy data\n";
     } else {
@@ -70,9 +70,9 @@ memManager::memManager(const char* name){
             usleep(500);
         }
        std::cout << "Process [" << getpid() << "] connected to existing policy data\n";
-    
-    } 
-     
+
+    }
+
     close(shm_fd);
 }
 

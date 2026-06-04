@@ -4,13 +4,18 @@ set -euo pipefail
 # ==============================================================================
 # Repeated llama.cpp phase matrix runner
 #
-# Default N_RUNS=25 is calibrated for N_LC=50 inside each matrix run, which
-# gives ~17 hours total wallclock. Use 20 for an overnight run, 25-30 if you
-# can leave it longer. For very quick smoke-test, pass 3 on the command line.
+# Usage:
+#   ./run_repeated_llama_phase_matrix.sh 2 continuous   # smoke-test new cases
+#   ./run_repeated_llama_phase_matrix.sh 50 continuous  # repeated continuous-LC test
+#   ./run_repeated_llama_phase_matrix.sh 25 base        # old A-H matrix only
+#   ./run_repeated_llama_phase_matrix.sh 25 all         # old A-H + new I-K cases
 #
-# Each matrix run produces 8 cases, with warmup before each timed measurement.
-# All cold-start artefacts (model load, JIT, CUDA context, KV cache prefix)
-# should be cleared by the warmup phase before measured requests begin.
+# Argument 1: number of repeated runs
+# Argument 2: run set: base | continuous | all
+#
+# Each matrix run creates a fresh runs/llama_phase_matrix_* directory, runs the
+# analyser on it, validates the expected case directories, then moves it under
+# a master repeated-run output directory.
 # ==============================================================================
 
 ROOT="/home/sc3321/FYP/llama_validation"
@@ -18,8 +23,14 @@ RUNNER="${ROOT}/scripts/run_llama_phase_matrix.sh"
 ANALYSER="${ROOT}/scripts/analyse_llama_phase_matrix.py"
 
 N_RUNS="${1:-25}"
+RUN_SET="${2:-continuous}"
 
-MASTER_OUT="${ROOT}/runs/llama_phase_repeated_$(date +%Y%m%d_%H%M%S)"
+if [[ "$RUN_SET" != "base" && "$RUN_SET" != "continuous" && "$RUN_SET" != "all" ]]; then
+  echo "ERROR: invalid RUN_SET='$RUN_SET'. Use: base, continuous, or all." >&2
+  exit 1
+fi
+
+MASTER_OUT="${ROOT}/runs/llama_phase_repeated_${RUN_SET}_$(date +%Y%m%d_%H%M%S)"
 LOG_DIR="${MASTER_OUT}/logs"
 
 mkdir -p "$MASTER_OUT" "$LOG_DIR"
@@ -33,6 +44,7 @@ echo "Root:        $ROOT"
 echo "Runner:      $RUNNER"
 echo "Analyser:    $ANALYSER"
 echo "N_RUNS:      $N_RUNS"
+echo "RUN_SET:     $RUN_SET"
 echo "MASTER_OUT:  $MASTER_OUT"
 echo "Start time:  $(date)"
 echo "======================================================================"
@@ -55,11 +67,55 @@ timestamp() {
 kill_old_servers() {
   pkill -u "$USER" -f llama-server 2>/dev/null || true
   rm -f /dev/shm/gpuphase_gpu0 2>/dev/null || true
+  rm -f /dev/shm/sharedMemName 2>/dev/null || true
   sleep 1
 }
 
 latest_matrix_dir() {
   ls -td "${ROOT}"/runs/llama_phase_matrix_* 2>/dev/null | head -1 || true
+}
+
+expected_cases_for_run_set() {
+  case "$RUN_SET" in
+    base)
+      cat <<'EOF'
+caseA_lc_alone_none
+caseB_be_long_alone_none
+caseC_lc_be_long_none
+caseD_lc_be_long_policy
+caseE_lc_be_short_none
+caseF_lc_be_short_policy
+caseG_lc_first_be_long_none
+caseH_lc_first_be_long_policy
+EOF
+      ;;
+    continuous)
+      cat <<'EOF'
+caseI_lc_cont_alone_none
+caseJ_lc_cont_be_long_none
+caseK_lc_cont_be_long_policy
+EOF
+      ;;
+    all)
+      cat <<'EOF'
+caseA_lc_alone_none
+caseB_be_long_alone_none
+caseC_lc_be_long_none
+caseD_lc_be_long_policy
+caseE_lc_be_short_none
+caseF_lc_be_short_policy
+caseG_lc_first_be_long_none
+caseH_lc_first_be_long_policy
+caseI_lc_cont_alone_none
+caseJ_lc_cont_be_long_none
+caseK_lc_cont_be_long_policy
+EOF
+      ;;
+    *)
+      echo "ERROR: unknown RUN_SET=$RUN_SET" >&2
+      return 1
+      ;;
+  esac
 }
 
 validate_run_dir() {
@@ -75,23 +131,15 @@ validate_run_dir() {
     return 1
   fi
 
-  local required_cases=(
-    "caseA_lc_alone_none"
-    "caseB_be_long_alone_none"
-    "caseC_lc_be_long_none"
-    "caseD_lc_be_long_policy"
-    "caseE_lc_be_short_none"
-    "caseF_lc_be_short_policy"
-    "caseG_lc_first_be_long_none"
-    "caseH_lc_first_be_long_policy"
-  )
+  local case_name
+  while IFS= read -r case_name; do
+    [[ -z "$case_name" ]] && continue
 
-  for case_name in "${required_cases[@]}"; do
     if [[ ! -d "$run_dir/$case_name" ]]; then
       echo "ERROR: missing case directory $case_name in $run_dir" >&2
       return 1
     fi
-  done
+  done < <(expected_cases_for_run_set)
 
   return 0
 }
@@ -108,6 +156,7 @@ root=${ROOT}
 runner=${RUNNER}
 analyser=${ANALYSER}
 n_runs_requested=${N_RUNS}
+run_set=${RUN_SET}
 start_time=$(date)
 user=${USER}
 hostname=$(hostname)
@@ -115,7 +164,12 @@ pwd=$(pwd)
 EOF
 }
 
+write_expected_cases_file() {
+  expected_cases_for_run_set > "${MASTER_OUT}/expected_cases.txt"
+}
+
 write_master_metadata
+write_expected_cases_file
 
 mkdir -p "${MASTER_OUT}/scripts_used"
 cp "$RUNNER" "${MASTER_OUT}/scripts_used/run_llama_phase_matrix.sh"
@@ -127,6 +181,12 @@ cp "$ANALYSER" "${MASTER_OUT}/scripts_used/analyse_llama_phase_matrix.py"
   echo
   echo "===== hostname ====="
   hostname
+  echo
+  echo "===== run set ====="
+  echo "$RUN_SET"
+  echo
+  echo "===== expected cases ====="
+  cat "${MASTER_OUT}/expected_cases.txt"
   echo
   echo "===== git status llama.cpp ====="
   if [[ -d "${ROOT}/llama.cpp/.git" ]]; then
@@ -146,7 +206,7 @@ cp "$ANALYSER" "${MASTER_OUT}/scripts_used/analyse_llama_phase_matrix.py"
 STATUS_CSV="${MASTER_OUT}/run_status.csv"
 
 cat > "$STATUS_CSV" <<EOF
-run_index,status,source_run_dir,dest_run_dir,event_count,start_time,end_time,duration_s
+run_index,status,run_set,source_run_dir,dest_run_dir,event_count,start_time,end_time,duration_s
 EOF
 
 success_count=0
@@ -166,15 +226,21 @@ for run_idx in $(seq 1 "$N_RUNS"); do
   echo
   echo "======================================================================"
   echo "[$start_time] Starting $run_label / $N_RUNS"
+  echo "RUN_SET=$RUN_SET"
   echo "======================================================================"
 
   {
     echo "======================================================================"
     echo "Run:        $run_label"
+    echo "Run set:    $RUN_SET"
     echo "Start time: $start_time"
     echo "Root:       $ROOT"
     echo "Master:     $MASTER_OUT"
     echo "======================================================================"
+    echo
+
+    echo "Expected cases for this run set:"
+    expected_cases_for_run_set
     echo
 
     echo "Killing old servers and clearing shared memory..."
@@ -188,8 +254,8 @@ for run_idx in $(seq 1 "$N_RUNS"); do
     nvidia-smi || true
     echo
 
-    echo "Running matrix..."
-    "$RUNNER"
+    echo "Running matrix with RUN_SET=$RUN_SET..."
+    "$RUNNER" "$RUN_SET"
 
     echo
     echo "Matrix script completed."
@@ -224,6 +290,18 @@ for run_idx in $(seq 1 "$N_RUNS"); do
       echo "ERROR: event count is zero; refusing to accept run." >&2
       exit 1
     fi
+
+    echo
+    echo "Checking summary.csv contains expected case labels where possible..."
+    while IFS= read -r case_name; do
+      [[ -z "$case_name" ]] && continue
+
+      # This is deliberately a warning, not a hard error, because some analysers
+      # may emit canonical case names from config.txt rather than directory names.
+      if ! grep -q "$case_name" "$source_run_dir/summary.csv"; then
+        echo "WARNING: summary.csv does not literally contain directory label $case_name"
+      fi
+    done < <(expected_cases_for_run_set)
 
     echo
     echo "Moving run to master output:"
@@ -281,7 +359,7 @@ for run_idx in $(seq 1 "$N_RUNS"); do
     kill_old_servers
   fi
 
-  echo "${run_idx},${run_status},${source_run_dir},${dest_run_dir},${event_count},${start_time},${end_time},${duration_s}" >> "$STATUS_CSV"
+  echo "${run_idx},${run_status},${RUN_SET},${source_run_dir},${dest_run_dir},${event_count},${start_time},${end_time},${duration_s}" >> "$STATUS_CSV"
 
   sleep 3
 done
@@ -293,9 +371,13 @@ done
   echo "======================================================================"
   echo "End time:        $(date)"
   echo "Requested runs:  $N_RUNS"
+  echo "Run set:         $RUN_SET"
   echo "Successful runs: $success_count"
   echo "Failed runs:     $fail_count"
   echo "Master output:   $MASTER_OUT"
+  echo
+  echo "Expected cases:"
+  cat "${MASTER_OUT}/expected_cases.txt"
   echo
   echo "Run status:"
   cat "$STATUS_CSV"
@@ -308,3 +390,4 @@ echo
 echo "All done."
 echo "Master output directory:"
 echo "$MASTER_OUT"
+

@@ -767,14 +767,49 @@ def nanosleep_durations_ms(path: Optional[str | Path]) -> List[float]:
 # Plot helpers
 # -----------------------------------------------------------------------------
 
-def annotate_delta(ax, x: float, y: float, text: str) -> None:
+def annotate_delta(ax, x: float, y: float, text: str, *, outside: bool = False) -> None:
+    """Place a compact delta label.
+
+    By default the label is inside the axes.  With outside=True it is placed
+    just above the plotting area, which avoids covering dense point clouds.
+    """
     ax.text(
         x, y, text,
         transform=ax.transAxes,
-        ha="right", va="top",
-        fontsize=9,
-        bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "edgecolor": COLOR_LIGHT, "alpha": 0.95},
+        ha="right", va="bottom" if outside else "top",
+        fontsize=8.5,
+        clip_on=False,
+        bbox={"boxstyle": "round,pad=0.22", "facecolor": "white", "edgecolor": COLOR_LIGHT, "alpha": 0.98},
     )
+
+
+def add_vertical_headroom(ax, top_frac: float = 0.10, bottom_frac: float = 0.06) -> None:
+    """Expand y-limits so annotations and mean bars do not crowd points."""
+    ymin, ymax = ax.get_ylim()
+    span = ymax - ymin
+    if span <= 0:
+        return
+    ax.set_ylim(ymin - span * bottom_frac, ymax + span * top_frac)
+
+
+def axis_scaled_values(values: Sequence[Optional[float]], base_unit: str) -> Tuple[List[float], str]:
+    """Return values in a readable unit and the corresponding axis label suffix.
+
+    The OS CSV stores p95/p99 in microseconds, but large values make Matplotlib
+    display distracting 1e6 offsets.  This helper converts us -> ms -> s when
+    appropriate and keeps the axis explicit.
+    """
+    vals = numeric_values(values)
+    if not vals:
+        return [], base_unit
+    med = float(np.median(np.abs(vals)))
+    if base_unit == "us":
+        if med >= 1_000_000:
+            return [v / 1_000_000.0 for v in vals], "s"
+        if med >= 1_000:
+            return [v / 1_000.0 for v in vals], "ms"
+        return vals, "us"
+    return vals, base_unit
 
 
 def scatter_two_groups(
@@ -836,14 +871,16 @@ def plot_delta_strip(
         m = mean(vals)
         if m is not None:
             ax.plot([i - 0.25, i + 0.25], [m, m], color="black", linewidth=2.0, zorder=4)
-            tick_labels.append(f"{labels[i]}\nmean {m:+.1f}%")
+            tick_labels.append(f"{labels[i]}\n{m:+.1f}%")
         else:
             tick_labels.append(f"{labels[i]}\nn/a")
     ax.axhline(0, color="black", linewidth=0.8, linestyle="--", zorder=1)
     ax.set_xticks(range(len(labels)))
     ax.set_xticklabels(tick_labels)
+    ax.tick_params(axis="x", pad=8)
     ax.set_ylabel(ylabel)
     ax.grid(axis="y", color=COLOR_LIGHT, linewidth=0.6, alpha=0.8)
+    add_vertical_headroom(ax, top_frac=0.12, bottom_frac=0.12)
 
 
 # -----------------------------------------------------------------------------
@@ -878,7 +915,9 @@ def fig1_policy_signature_nanosleep(
     ax.set_ylabel("event count")
     ax.set_xlim(0, 20)
     ax.grid(axis="y", color=COLOR_LIGHT, linewidth=0.6, alpha=0.8)
-    ax.legend(loc="upper right", frameon=False)
+    ax.legend(loc="upper right", bbox_to_anchor=(1.0, 1.16), ncol=2,
+              frameon=False, borderaxespad=0.0, handlelength=1.8, columnspacing=1.2)
+    fig.subplots_adjust(top=0.82)
 
     out = out_dir / "fig1_policy_signature_nanosleep.png"
     fig.savefig(out)
@@ -905,28 +944,41 @@ def fig2_os_futex_reshape_jk(os_rows: List[dict], out_dir: Path, summary_rows: L
         skip("fig 2: no J/K futex wake-cohort rows in OS CSV")
         return
 
-    none_p95_us = [p[3] for p in pairs if p[3] is not None]
-    cap_p95_us = [p[4] for p in pairs if p[4] is not None]
+    none_p95_raw = [p[3] for p in pairs if p[3] is not None]
+    cap_p95_raw = [p[4] for p in pairs if p[4] is not None]
+    scaled_p95, p95_unit = axis_scaled_values(none_p95_raw + cap_p95_raw, "us")
+    # Preserve none/cap lengths after choosing a common readable unit.
+    if p95_unit == "s":
+        none_p95 = [v / 1_000_000.0 for v in none_p95_raw]
+        cap_p95 = [v / 1_000_000.0 for v in cap_p95_raw]
+    elif p95_unit == "ms":
+        none_p95 = [v / 1_000.0 for v in none_p95_raw]
+        cap_p95 = [v / 1_000.0 for v in cap_p95_raw]
+    else:
+        none_p95 = list(none_p95_raw)
+        cap_p95 = list(cap_p95_raw)
     none_p99_s = [p[1] / 1e6 for p in pairs if p[1] is not None]
     cap_p99_s = [p[2] / 1e6 for p in pairs if p[2] is not None]
 
-    fig, axes = plt.subplots(1, 2, figsize=(7.4, 3.45))
+    fig, axes = plt.subplots(1, 2, figsize=(7.6, 3.45))
 
     d95 = scatter_two_groups(
-        axes[0], none_p95_us, cap_p95_us,
-        ylabel="LC futex wake p95 (us)",
+        axes[0], none_p95, cap_p95,
+        ylabel=f"LC futex wake p95 ({p95_unit})",
         left_label="J\nnone", right_label="K\ncap", seed=11,
     )
-    axes[0].set_title("Body")
-    annotate_delta(axes[0], 0.98, 0.96, f"mean delta {format_delta(d95)}")
+    add_vertical_headroom(axes[0], top_frac=0.16, bottom_frac=0.05)
+    axes[0].set_title("Body", pad=16)
+    annotate_delta(axes[0], 0.98, 1.04, f"mean delta {format_delta(d95)}", outside=True)
 
     d99 = scatter_two_groups(
         axes[1], none_p99_s, cap_p99_s,
         ylabel="LC futex wake p99 (s)",
         left_label="J\nnone", right_label="K\ncap", seed=12,
     )
-    axes[1].set_title("Tail")
-    annotate_delta(axes[1], 0.98, 0.96, f"mean delta {format_delta(d99)}")
+    add_vertical_headroom(axes[1], top_frac=0.16, bottom_frac=0.05)
+    axes[1].set_title("Tail", pad=16)
+    annotate_delta(axes[1], 0.98, 1.04, f"mean delta {format_delta(d99)}", outside=True)
 
     legend_elements = [
         Line2D([0], [0], marker=MARKER_NONE, color="w", label="case J / none",
@@ -935,6 +987,7 @@ def fig2_os_futex_reshape_jk(os_rows: List[dict], out_dir: Path, summary_rows: L
                markerfacecolor=COLOR_CAP, markeredgecolor="black", markersize=6),
     ]
     axes[1].legend(handles=legend_elements, loc="lower right", frameon=False)
+    fig.subplots_adjust(top=0.80, wspace=0.34)
 
     out = out_dir / "fig2_os_futex_reshape_jk.png"
     fig.savefig(out)
@@ -942,7 +995,7 @@ def fig2_os_futex_reshape_jk(os_rows: List[dict], out_dir: Path, summary_rows: L
     ok(f"fig 2: wrote {out}")
 
     summary_rows.extend([
-        {"figure": "fig2_os_futex_reshape_jk", "metric": "os_futex_woken_p95_us", "none": mean(none_p95_us), "cap": mean(cap_p95_us), "delta_pct": d95, "n_none": len(none_p95_us), "n_cap": len(cap_p95_us)},
+        {"figure": "fig2_os_futex_reshape_jk", "metric": "os_futex_woken_p95_us", "none": mean(none_p95_raw), "cap": mean(cap_p95_raw), "delta_pct": d95, "n_none": len(none_p95_raw), "n_cap": len(cap_p95_raw)},
         {"figure": "fig2_os_futex_reshape_jk", "metric": "os_futex_woken_p99_s", "none": mean(none_p99_s), "cap": mean(cap_p99_s), "delta_pct": d99, "n_none": len(none_p99_s), "n_cap": len(cap_p99_s)},
     ])
 
@@ -980,11 +1033,8 @@ def fig3_app_latency_stack_jk(
         ylabel="LC p99 delta under cap (%)",
         seed=21,
     )
-    ax.set_ylim(auto=True)
-    # Make improvement direction visually explicit without using a long title.
-    ymin, ymax = ax.get_ylim()
-    ax.text(0.01, 0.05, "lower is better for LC", transform=ax.transAxes,
-            ha="left", va="bottom", fontsize=8.5, color=COLOR_NEUTRAL)
+    ax.set_xlabel("application-layer LC metric (mean delta shown below)", labelpad=10)
+    fig.subplots_adjust(bottom=0.26)
 
     out = out_dir / "fig3_app_latency_stack_jk.png"
     fig.savefig(out)
@@ -1042,9 +1092,8 @@ def fig4_lc_be_tradeoff_jk(
         ylabel="client p99 delta under cap (%)",
         seed=31,
     )
-    ax.text(0.01, 0.05, "negative protects LC; positive penalises BE",
-            transform=ax.transAxes, ha="left", va="bottom", fontsize=8.5,
-            color=COLOR_NEUTRAL)
+    ax.set_xlabel("workload class (mean delta shown below)", labelpad=10)
+    fig.subplots_adjust(bottom=0.28)
 
     out = out_dir / "fig4_lc_be_tradeoff_jk.png"
     fig.savefig(out)
@@ -1118,15 +1167,18 @@ def fig5_cross_layer_case_matrix(
     for i in range(matrix.shape[0]):
         for j in range(matrix.shape[1]):
             if np.isfinite(matrix[i, j]):
-                ax.text(j, i, f"{matrix[i, j]:+.1f}%\n(n={int(cell_counts[i, j])})",
-                        ha="center", va="center", fontsize=8.5, color="black")
+                val = matrix[i, j]
+                text_color = "white" if abs(val) > 0.55 * max_abs else "black"
+                ax.text(j, i, f"{val:+.1f}%\n(n={int(cell_counts[i, j])})",
+                        ha="center", va="center", fontsize=8.3, color=text_color)
             else:
-                ax.text(j, i, "n/a", ha="center", va="center", fontsize=8.5, color="black")
+                ax.text(j, i, "n/a", ha="center", va="center", fontsize=8.3, color="black")
 
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     cbar.set_label("p99 delta under cap (%)")
-    ax.set_xlabel("case pair")
-    ax.set_ylabel("measurement layer")
+    ax.set_xlabel("case pair", labelpad=8)
+    ax.set_ylabel("measurement layer", labelpad=10)
+    fig.subplots_adjust(left=0.20, bottom=0.23, right=0.88)
 
     out = out_dir / "fig5_cross_layer_case_matrix.png"
     fig.savefig(out)

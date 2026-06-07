@@ -1,0 +1,21 @@
+figure,metric,none,cap,delta_pct,n_none,n_cap,n_none_samples,n_cap_samples,n_paired_reps_or_points,case_pair,n_points
+fig1_policy_signature_nanosleep,clock_nanosleep_count_0_20ms,0,277,,,,,,,,
+fig2_os_futex_reshape_jk,os_futex_woken_p95_us,552802.8643783332,757566.043088332,37.04090407351088,30,30,,,,,
+fig2_os_futex_reshape_jk,os_futex_woken_p99_s,4.447621655474666,3.901767198321999,-12.27295169050102,30,30,,,,,
+fig3_app_latency_stack_jk,lc_decode_p99_ms,12.98604156666667,7.6346275,-34.64747613748788,,,0,0,30,,
+fig3_app_latency_stack_jk,lc_request_p99_ms,1748.2372789333338,1443.097341566667,-15.830371597509872,,,0,0,30,,
+fig3_app_latency_stack_jk,lc_client_p99_ms,2055.0,1551.0,-15.315540551534868,,,1500,1500,30,,
+fig4_lc_be_tradeoff_jk,lc_client_p99_ms,2055.0,1551.0,-15.315540551534868,,,1500,1500,30,,
+fig4_lc_be_tradeoff_jk,be_client_p99_ms,5928.51,11418.199999999999,58.49388997708241,,,750,750,30,,
+fig5_cross_layer_case_matrix,OS futex p99,,,-1.188683867640306,,,,,,C/D,30
+fig5_cross_layer_case_matrix,App decode p99,,,-0.062129878940348014,,,,,,C/D,30
+fig5_cross_layer_case_matrix,App request p99,,,1.065453245363592,,,,,,C/D,30
+fig5_cross_layer_case_matrix,App client p99,,,0.6845021593177598,,,,,,C/D,30
+fig5_cross_layer_case_matrix,OS futex p99,,,-0.14217618239251478,,,,,,E/F,30
+fig5_cross_layer_case_matrix,App decode p99,,,0.2524343445863017,,,,,,E/F,30
+fig5_cross_layer_case_matrix,App request p99,,,-0.5287560444433803,,,,,,E/F,30
+fig5_cross_layer_case_matrix,App client p99,,,-0.6316612201458096,,,,,,E/F,30
+fig5_cross_layer_case_matrix,OS futex p99,,,-12.281007223681227,,,,,,J/K,30
+fig5_cross_layer_case_matrix,App decode p99,,,-34.64747613748788,,,,,,J/K,30
+fig5_cross_layer_case_matrix,App request p99,,,-15.830371597509872,,,,,,J/K,30
+fig5_cross_layer_case_matrix,App client p99,,,-15.315540551534868,,,,,,J/K,30

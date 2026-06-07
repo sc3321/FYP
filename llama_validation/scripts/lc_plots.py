@@ -968,8 +968,11 @@ def fig2_os_futex_reshape_jk(os_rows: List[dict], out_dir: Path, summary_rows: L
         left_label="J\nnone", right_label="K\ncap", seed=11,
     )
     add_vertical_headroom(axes[0], top_frac=0.16, bottom_frac=0.05)
-    axes[0].set_title("Body", pad=16)
-    annotate_delta(axes[0], 0.98, 1.04, f"mean delta {format_delta(d95)}", outside=True)
+    # Keep the panel label and delta in different regions.  The delta is
+    # inside the deliberately-added headroom, not above the axes, so it cannot
+    # collide with the title.
+    axes[0].set_title("Body (p95)", loc="left", pad=8)
+    annotate_delta(axes[0], 0.98, 0.98, f"mean delta {format_delta(d95)}", outside=False)
 
     d99 = scatter_two_groups(
         axes[1], none_p99_s, cap_p99_s,
@@ -977,17 +980,12 @@ def fig2_os_futex_reshape_jk(os_rows: List[dict], out_dir: Path, summary_rows: L
         left_label="J\nnone", right_label="K\ncap", seed=12,
     )
     add_vertical_headroom(axes[1], top_frac=0.16, bottom_frac=0.05)
-    axes[1].set_title("Tail", pad=16)
-    annotate_delta(axes[1], 0.98, 1.04, f"mean delta {format_delta(d99)}", outside=True)
+    axes[1].set_title("Tail (p99)", loc="left", pad=8)
+    annotate_delta(axes[1], 0.98, 0.98, f"mean delta {format_delta(d99)}", outside=False)
 
-    legend_elements = [
-        Line2D([0], [0], marker=MARKER_NONE, color="w", label="case J / none",
-               markerfacecolor=COLOR_NONE, markeredgecolor="black", markersize=6),
-        Line2D([0], [0], marker=MARKER_CAP, color="w", label="case K / cap",
-               markerfacecolor=COLOR_CAP, markeredgecolor="black", markersize=6),
-    ]
-    axes[1].legend(handles=legend_elements, loc="lower right", frameon=False)
-    fig.subplots_adjust(top=0.80, wspace=0.34)
+    # No in-plot legend: the x-axis labels identify J/none and K/cap on both
+    # panels.  Keeping the legend out avoids covering the low K tail points.
+    fig.subplots_adjust(top=0.90, bottom=0.18, wspace=0.34)
 
     out = out_dir / "fig2_os_futex_reshape_jk.png"
     fig.savefig(out)

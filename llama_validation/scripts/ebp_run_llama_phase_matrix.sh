@@ -5,7 +5,9 @@ ROOT="/home/sc3321/FYP/llama_validation"
 SERVER="${ROOT}/llama.cpp/build/bin/llama-server"
 MODEL="${ROOT}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf"
 
-OUT_ROOT="${ROOT}/runs/llama_phase_matrix_$(date +%Y%m%d_%H%M%S)"
+# Base output dir. When N_REPS > 1 each replicate goes into a repNN/ subdir.
+OUT_ROOT_BASE="${ROOT}/runs/llama_phase_matrix_$(date +%Y%m%d_%H%M%S)"
+OUT_ROOT="$OUT_ROOT_BASE"   # overridden per-rep below
 
 LC_PORT=8080
 BE_PORT=8081
@@ -14,7 +16,18 @@ BE_PORT=8081
 #   ./script.sh all          # old matrix + new continuous-LC cases
 #   ./script.sh base         # old matrix only
 #   ./script.sh continuous   # new continuous-LC cases only
+#
+# With replicates / case filtering (preferred for the LC-side eBPF analysis):
+#   N_REPS=10 CASES="C D E F J K" ./script.sh
+#
+#   N_REPS  - integer, how many independent matrix runs to perform back-to-back.
+#             Each rep lives in OUT_ROOT_BASE/repNN/. Default 1 (no rep subdir).
+#   CASES   - space-separated case letters. Overrides RUN_SET when set.
+#             Letters map to the existing run_case_* functions; see
+#             run_case_by_letter() at the bottom of this file.
 RUN_SET="${1:-all}"
+N_REPS="${N_REPS:-1}"
+CASES="${CASES:-}"
 
 # Increased request counts for statistically meaningful tail percentiles.
 N_LC=50
@@ -40,10 +53,6 @@ POLICY_SAMPLE_MS=1000
 N_GPU_LAYERS=99
 
 # New continuous-LC experiment controls.
-# LC_CONCURRENCY controls how many LC client requests are kept in flight.
-# LC_SERVER_PARALLEL controls llama-server slots for the LC server.
-# For the continuous experiment, LC starts first, then BE-long starts shortly
-# after, so activeLC should already be >0 when BE admission decisions happen.
 LC_CONCURRENCY=4
 LC_SERVER_PARALLEL=4
 BE_SERVER_PARALLEL=1
@@ -52,27 +61,20 @@ LC_BE_LAUNCH_GAP_SEC=0.20
 # ------------------------------------------------------------------------------
 # eBPF tracing configuration
 # ------------------------------------------------------------------------------
-# EBPF_TRACE=1   -> attach the syscall tracer to both servers in every case.
-# EBPF_TRACE=0   -> disable tracing entirely (original behaviour).
-# EBPF_TRACE_IOCTL=1 -> also instruct the tracer to emit ioctl events. Off by
-#   default because ioctl volume under GPU load is very large and is NOT needed
-#   for the script-1 (BE nanosleep) or LC futex/poll-tail results. The tracer
-#   reads this via the EBPF_WATCH_IOCTL env var (see note below).
-# EBPF_TRACER -> path to the compiled libbpf tracer binary.
-# EBPF_ATTACH_SETTLE_SEC -> delay after attach before clients fire, so the
-#   tracer is live before the first admission decision.
 EBPF_TRACE="${EBPF_TRACE:-1}"
 EBPF_TRACE_IOCTL="${EBPF_TRACE_IOCTL:-0}"
 EBPF_TRACER="${EBPF_TRACER:-${ROOT}/../ebpf/syscallTrace/syscall_trace}"
 EBPF_ATTACH_SETTLE_SEC="${EBPF_ATTACH_SETTLE_SEC:-0.5}"
 EBPF_PID=""
 
-mkdir -p "$OUT_ROOT"
+mkdir -p "$OUT_ROOT_BASE"
 
-echo "Output directory:      $OUT_ROOT"
+echo "Output base directory: $OUT_ROOT_BASE"
 echo "Server:                $SERVER"
 echo "Model:                 $MODEL"
 echo "Run set:               $RUN_SET"
+echo "N_REPS:                $N_REPS"
+echo "CASES (filter):        ${CASES:-<unset; using RUN_SET>}"
 echo "GPU layers:            $N_GPU_LAYERS"
 echo "N_LC:                  $N_LC (warmup: $N_WARMUP_LC)"
 echo "N_BE_LONG:             $N_BE_LONG (warmup: $N_WARMUP_BE)"
@@ -99,8 +101,6 @@ if [[ ! -f "$MODEL" ]]; then
   exit 1
 fi
 
-# Validate tracer presence early if tracing requested, so you find out at the
-# top of the run rather than 8 cases in.
 if [[ "$EBPF_TRACE" == "1" ]]; then
   if [[ ! -x "$EBPF_TRACER" ]]; then
     echo "ERROR: EBPF_TRACE=1 but tracer not executable at $EBPF_TRACER" >&2
@@ -146,16 +146,7 @@ reset_shared_memory() {
 }
 
 # ------------------------------------------------------------------------------
-# eBPF tracer attach / detach
-#
-# start_ebpf_trace attaches the tracer to whichever of LC_PID / BE_PID are set
-# at call time, writing JSONL into the case directory. It must be called AFTER
-# the servers are up (so PIDs exist) and BEFORE any client fires (so the first
-# admission decision is captured).
-#
-# stop_ebpf_trace sends SIGINT (the tracer installs a clean handler) and waits.
-# It is also called from the EXIT trap so a crashed run does not orphan a
-# tracer holding a ring buffer.
+# eBPF tracer attach / detach (unchanged)
 # ------------------------------------------------------------------------------
 start_ebpf_trace() {
   local case_dir="$1"
@@ -172,26 +163,21 @@ start_ebpf_trace() {
   fi
 
   echo "Attaching eBPF tracer to PIDs: ${pids[*]} (ioctl=$EBPF_TRACE_IOCTL)"
+  
+  printf "LC_PID=%s\n" "${LC_PID:-}" > "${case_dir}/pids.txt"
+  printf "BE_PID=%s\n" "${BE_PID:-}" >> "${case_dir}/pids.txt"
 
-  # EBPF_WATCH_IOCTL is read by the tracer to decide whether to add the ioctl
-  # syscall to its watch set. If your current tracer build always watches the
-  # default set (including ioctl) and has no such env hook, this var is simply
-  # ignored and you will get ioctl events regardless -- harmless, just larger
-  # logs. See the note in the assistant message about making ioctl opt-in.
-  EBPF_WATCH_IOCTL="$EBPF_TRACE_IOCTL" \
-  "$EBPF_TRACER" "${pids[@]}" \
+  sudo -n env EBPF_WATCH_IOCTL="$EBPF_TRACE_IOCTL" \
+    "$EBPF_TRACER" "${pids[@]}" \
     > "${case_dir}/ebpf_events.jsonl" \
     2> "${case_dir}/ebpf_stderr.log" &
   EBPF_PID=$!
-
-  # Confirm it actually came up before we let clients run.
+  
   sleep "$EBPF_ATTACH_SETTLE_SEC"
   if ! kill -0 "$EBPF_PID" 2>/dev/null; then
     echo "ERROR: eBPF tracer died immediately after launch. stderr:" >&2
     tail -40 "${case_dir}/ebpf_stderr.log" >&2 || true
     EBPF_PID=""
-    # Do not abort the whole matrix for a tracing failure; the application-level
-    # results are still valid. Warn loudly and continue untraced.
     echo "WARNING: continuing this case WITHOUT eBPF tracing." >&2
     return 0
   fi
@@ -204,7 +190,6 @@ stop_ebpf_trace() {
   EBPF_PID=""
 }
 
-# Ensure both servers and any live tracer are cleaned up on any exit.
 trap 'stop_ebpf_trace; cleanup_servers' EXIT
 
 wait_for_server() {
@@ -600,10 +585,6 @@ check_case_events() {
   fi
 }
 
-# Quick post-case eBPF sanity line so you see whether the tracer captured
-# anything without opening the file. Counts BE-side nanosleep/clock_nanosleep
-# events in the 4-8ms band (the policy backoff signature). Pure diagnostics;
-# never fatal.
 ebpf_quick_summary() {
   local case_dir="$1"
   local jf="${case_dir}/ebpf_events.jsonl"
@@ -617,7 +598,6 @@ ebpf_quick_summary() {
   local total sleeps band
   total=$(wc -l < "$jf" 2>/dev/null || echo 0)
   sleeps=$(grep -c '"kind":"\(clock_\)\?nanosleep"' "$jf" 2>/dev/null || echo 0)
-  # 4ms..8ms in ns = 4000000..8000000; crude grep on dur_ns width.
   band=$(grep '"kind":"\(clock_\)\?nanosleep"' "$jf" 2>/dev/null \
          | grep -oE '"dur_ns":[0-9]+' \
          | awk -F: '$2>=4000000 && $2<=8000000{c++} END{print c+0}')
@@ -625,7 +605,7 @@ ebpf_quick_summary() {
 }
 
 # ------------------------------------------------------------------------------
-# Original cases
+# Case functions (unchanged from original)
 # ------------------------------------------------------------------------------
 
 run_case_lc_alone() {
@@ -858,10 +838,6 @@ run_case_lc_first_be_long_policy() {
   cleanup_servers
 }
 
-# ------------------------------------------------------------------------------
-# New continuous-LC cases
-# ------------------------------------------------------------------------------
-
 run_case_lc_cont_alone_none() {
   local case_dir="${OUT_ROOT}/caseI_lc_cont_alone_none"
   mkdir -p "$case_dir"
@@ -966,31 +942,77 @@ run_continuous_cases() {
   run_case_lc_cont_be_long_policy
 }
 
-case "$RUN_SET" in
-  all)
-    run_base_cases
-    run_continuous_cases
-    ;;
-  base)
-    run_base_cases
-    ;;
-  continuous)
-    run_continuous_cases
-    ;;
-  *)
-    echo "ERROR: unknown RUN_SET '$RUN_SET'. Use: all, base, or continuous." >&2
-    exit 1
-    ;;
-esac
+# ------------------------------------------------------------------------------
+# Letter-to-function dispatch (new)
+# ------------------------------------------------------------------------------
+run_case_by_letter() {
+  case "$1" in
+    A) run_case_lc_alone ;;
+    B) run_case_be_long_alone ;;
+    C) run_case_lc_be_long_none_be_first ;;
+    D) run_case_lc_be_long_policy_be_first ;;
+    E) run_case_lc_be_short_none ;;
+    F) run_case_lc_be_short_policy ;;
+    G) run_case_lc_first_be_long_none ;;
+    H) run_case_lc_first_be_long_policy ;;
+    I) run_case_lc_cont_alone_none ;;
+    J) run_case_lc_cont_be_long_none ;;
+    K) run_case_lc_cont_be_long_policy ;;
+    *) echo "ERROR: unknown case letter '$1'" >&2; exit 1 ;;
+  esac
+}
 
+# One replicate's worth of work. Respects CASES if set, else RUN_SET.
+dispatch_one_replicate() {
+  if [[ -n "$CASES" ]]; then
+    for letter in $CASES; do
+      run_case_by_letter "$letter"
+    done
+  else
+    case "$RUN_SET" in
+      all)        run_base_cases; run_continuous_cases ;;
+      base)       run_base_cases ;;
+      continuous) run_continuous_cases ;;
+      *)
+        echo "ERROR: unknown RUN_SET '$RUN_SET'. Use: all, base, or continuous." >&2
+        exit 1
+        ;;
+    esac
+  fi
+}
+
+# ------------------------------------------------------------------------------
+# Main loop: replicates
+# ------------------------------------------------------------------------------
+if [[ "$N_REPS" -gt 1 ]]; then
+  for rep in $(seq 1 "$N_REPS"); do
+    rep_padded=$(printf "rep%02d" "$rep")
+    OUT_ROOT="${OUT_ROOT_BASE}/${rep_padded}"
+    mkdir -p "$OUT_ROOT"
+    echo
+    echo "########################################"
+    echo "# REPLICATE $rep / $N_REPS"
+    echo "# OUT_ROOT: $OUT_ROOT"
+    echo "########################################"
+    echo
+    dispatch_one_replicate
+  done
+else
+  # Single-rep mode preserves the original flat layout.
+  OUT_ROOT="$OUT_ROOT_BASE"
+  dispatch_one_replicate
+fi
+
+echo
 echo "All requested runs complete."
-echo "Results in: $OUT_ROOT"
+echo "Results in: $OUT_ROOT_BASE"
 
 if [[ "$EBPF_TRACE" == "1" ]]; then
   echo
   echo "eBPF per-case quick summary (BE policy-backoff signature):"
-  for d in "$OUT_ROOT"/case*/; do
+  # Handle both layouts: flat (single-rep) and nested (repNN/caseX_*/).
+  for d in "$OUT_ROOT_BASE"/case*/ "$OUT_ROOT_BASE"/rep*/case*/; do
+    [[ -d "$d" ]] || continue
     ebpf_quick_summary "$d"
   done
 fi
-

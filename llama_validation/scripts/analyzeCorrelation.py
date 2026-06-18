@@ -168,37 +168,34 @@ def detect_requests_instr(phases: pd.DataFrame) -> list[RequestBoundary]:
 
 
 def detect_requests_preload(events: pd.DataFrame,
-                            gap_threshold_ms: float = 100.0
+                            expected_requests: int = 53
                             ) -> list[RequestBoundary]:
-    """In the preload arm there is no request label. Detect request boundaries
-    from gaps in AUTO_CUDA event activity. Inside a request, sync calls are
-    dense; between requests, the server is idle waiting for the next HTTP
-    request, so the gap is much longer than the inter-sync interval.
+    """Top-K gap detection. We know how many requests the client issued
+    (N_WARMUP + N_LC), so we identify boundaries as the (K-1) largest
+    inter-event gaps rather than thresholding against an absolute value.
+    Robust to dense baseline sync activity where no clean threshold exists.
     """
     if events.empty:
         return []
-    auto = events[events['label'].str.startswith('AUTO_CUDA')].copy()
-    if auto.empty:
-        return []
-    # Use only BEGIN events for boundary detection; one event per sync call
-    # is enough and avoids double-counting BEGIN/END pairs.
+    auto = events[events['label'].str.startswith('AUTO_CUDA')]
     begins = auto[auto['kind'] == 'BEGIN'].sort_values('ts_ns')
-    if begins.empty:
+    if len(begins) < expected_requests:
         return []
     ts = begins['ts_ns'].values
     gaps = np.diff(ts)
-    gap_threshold_ns = int(gap_threshold_ms * 1_000_000)
-    # A new request starts at the event after each large gap. Always include
-    # the first event as the start of the first request.
-    boundaries = [0] + (np.where(gaps > gap_threshold_ns)[0] + 1).tolist() + [len(ts)]
-    out = []
-    for i in range(len(boundaries) - 1):
-        s = ts[boundaries[i]]
-        # End of this request = last event in the cluster.
-        e = ts[boundaries[i + 1] - 1]
-        out.append(RequestBoundary(int(s), int(e), f'gap>{gap_threshold_ms}ms'))
-    return out
-
+    # Indices of the (expected_requests - 1) largest gaps. Each such gap is
+    # a transition between consecutive requests.
+    n_boundaries = expected_requests - 1
+    boundary_idx = np.argpartition(gaps, -n_boundaries)[-n_boundaries:]
+    boundary_idx = np.sort(boundary_idx)
+    # Convert gap indices to event indices: a gap at index i sits between
+    # events i and i+1; the new request starts at event i+1.
+    starts = [0] + (boundary_idx + 1).tolist()
+    ends = (boundary_idx).tolist() + [len(ts) - 1]
+    return [
+        RequestBoundary(int(ts[s]), int(ts[e]), 'top-K gap')
+        for s, e in zip(starts, ends)
+    ]
 
 # ---------------------------------------------------------------------------
 # Per-request event density

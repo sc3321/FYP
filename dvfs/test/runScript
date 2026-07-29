@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# run_power_test.sh — set power limit, run sustained load, poll average clock
+#
+# Usage: ./run_power_test.sh <watts> [duration_sec] [iters_per_launch]
+#
+# Assumes: ./test, ./poll, ./sustainedLoad already built, in cwd (adjust paths below).
+# test.cpp is hardcoded to device index 0 — this script only targets device 0.
+# sustainedLoad defaults to device 0 too, so this is consistent, but note it if you
+# later want to test the second Titan X: test.cpp would need a device argument added.
+
+set -euo pipefail
+
+WATTS="${1:?Usage: $0 <watts> [duration_sec] [iters_per_launch]}"
+DURATION="${2:-30}"
+ITERS="${3:-200000}"
+
+MILLIWATTS=$(( WATTS * 1000 ))
+
+TEST_BIN="./test"
+LOAD_BIN="./sustainedLoad"
+POLL_BIN="./poll"
+
+echo "=== Setting power limit: ${WATTS}W (${MILLIWATTS} mW) ==="
+sudo "${TEST_BIN}" "${MILLIWATTS}"
+
+echo "=== Launching sustained load (${DURATION}s, iters=${ITERS}) ==="
+"${LOAD_BIN}" "${DURATION}" 0 "${ITERS}" &
+LOAD_PID=$!
+echo "sustainedLoad PID: ${LOAD_PID}"
+
+# Let the kernel actually start executing on-GPU before poll begins sampling,
+# so the average isn't diluted by pre-launch idle clock.
+sleep 2
+
+echo "=== Polling clock speed against PID ${LOAD_PID} ==="
+"${POLL_BIN}" "${LOAD_PID}"
+
+wait "${LOAD_PID}"
+echo "=== Run complete: ${WATTS}W ==="

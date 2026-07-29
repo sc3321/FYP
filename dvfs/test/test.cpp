@@ -44,6 +44,9 @@ int main(int argc, char* argv[]) {
     std::cout << "default power limit: " << gpuPowerLimit << "\n";
 
     result = nvmlDeviceSetPowerManagementLimit(gpuDevice, requestedPowerDraw);
+    if (result != NVML_SUCCESS) {
+        std::cerr << "Failed to set power limit: " << nvmlErrorString(result) << std::endl;
+    }    
     
     result = nvmlDeviceGetPowerManagementLimit(gpuDevice, &gpuPowerLimit);
     std::cout << "new power limit: " << gpuPowerLimit << "\n" ;
